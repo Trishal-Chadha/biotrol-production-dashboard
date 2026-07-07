@@ -5,8 +5,11 @@ import ProductsPage from './pages/ProductsPage';
 import EmployeesPage from './pages/EmployeesPage';
 import ProductionDataPage from './pages/ProductionDataPage';
 import ProductionAnalysisPage from './pages/ProductionAnalysisPage';
+import ProductionComparisonPage from './pages/ProductionComparisonPage';
+import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import { AuthProvider, useAuth } from './lib/auth';
+import { ThemeProvider } from './lib/theme';
 import { Lock } from 'lucide-react';
 
 function ProtectedPage({
@@ -34,9 +37,17 @@ function ProtectedPage({
     if (page === 'production-analysis') {
       return <ProductionAnalysisPage />;
     }
+    // Employees have read-only access to production-comparison
+    if (page === 'production-comparison') {
+      return <ProductionComparisonPage />;
+    }
     // Employees can't access employees page
     if (page === 'employees') {
       return <AccessDenied message="You don't have permission to access the Employees page." />;
+    }
+    // Employees can't access settings page
+    if (page === 'settings') {
+      return <AccessDenied message="You don't have permission to access the Settings page." />;
     }
   }
 
@@ -53,6 +64,10 @@ function ProtectedPage({
         return <ProductionDataPage />;
       case 'production-analysis':
         return <ProductionAnalysisPage />;
+      case 'production-comparison':
+        return <ProductionComparisonPage />;
+      case 'settings':
+        return <SettingsPage />;
     }
   }
 
@@ -150,7 +165,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
     </AuthProvider>
   );
 }

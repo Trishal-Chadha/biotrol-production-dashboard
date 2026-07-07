@@ -8,6 +8,8 @@ import {
   ChevronRight,
   Activity,
   LogOut,
+  BarChart3,
+  Settings,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 
@@ -16,7 +18,9 @@ export type Page =
   | 'products'
   | 'employees'
   | 'production-data'
-  | 'production-analysis';
+  | 'production-analysis'
+  | 'production-comparison'
+  | 'settings';
 
 interface SidebarProps {
   activePage: Page;
@@ -51,8 +55,15 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
       items: [
         { id: 'production-data', label: 'Production Data', icon: <ClipboardList size={18} /> },
         { id: 'production-analysis', label: 'Production Analysis', icon: <BarChart2 size={18} /> },
+        { id: 'production-comparison', label: 'Comparison Analysis', icon: <BarChart3 size={18} /> },
       ],
     },
+    ...(user?.role === 'admin' ? [{
+      heading: 'Administration',
+      items: [
+        { id: 'settings' as Page, label: 'Settings', icon: <Settings size={18} /> },
+      ],
+    }] : []),
   ];
 
   const handleLogout = async () => {

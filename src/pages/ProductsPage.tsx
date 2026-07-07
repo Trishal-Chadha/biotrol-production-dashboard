@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   Plus, Pencil, Trash2, X, Check, Search, Download, Upload, FileSpreadsheet,
-  Eye, Filter, AlertCircle, CheckCircle2, XCircle, FileX
+  Eye, Filter, AlertCircle, CheckCircle2, XCircle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase, Product } from '../lib/supabase';
@@ -76,11 +76,13 @@ export default function ProductsPage({ readOnly = false }: ProductsPageProps) {
   }
 
   function openAdd() {
+    if (readOnly) return;
     resetForm();
     setShowAddForm(true);
   }
 
   function openEdit(p: Product) {
+    if (readOnly) return;
     setForm({
       code: p.code ?? '',
       name: p.name,
@@ -124,12 +126,14 @@ export default function ProductsPage({ readOnly = false }: ProductsPageProps) {
   }
 
   async function handleDelete(id: string) {
+    if (readOnly) return;
     if (!confirm('Are you sure you want to delete this product?')) return;
     await supabase.from('products').delete().eq('id', id);
     fetchProducts();
   }
 
   async function toggleStatus(p: Product) {
+    if (readOnly) return;
     await supabase.from('products').update({ active: !p.active }).eq('id', p.id);
     fetchProducts();
   }
@@ -146,7 +150,7 @@ export default function ProductsPage({ readOnly = false }: ProductsPageProps) {
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { raw: false });
 
-        const processed: ImportRow[] = rows.map((row, idx) => {
+        const processed: ImportRow[] = rows.map((row) => {
           const keys = Object.keys(row).map(k => k.toLowerCase().replace(/\s+/g, ''));
           const codeKey = keys.find(k => k.includes('code')) || Object.keys(row)[0];
           const nameKey = keys.find(k => k.includes('name') && !k.includes('code')) || Object.keys(row)[1];
@@ -193,6 +197,7 @@ export default function ProductsPage({ readOnly = false }: ProductsPageProps) {
   }
 
   async function handleImport() {
+    if (readOnly) return;
     setImporting(true);
     const toImport = importData.filter(r => r.isValid && (!r.isDuplicate || importOption === 'update'));
 
@@ -337,7 +342,7 @@ export default function ProductsPage({ readOnly = false }: ProductsPageProps) {
         </div>
       </div>
 
-      {showAddForm && (
+      {showAddForm && !readOnly && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-700">{editId ? 'Edit Product' : 'Add New Product'}</h2>
@@ -549,7 +554,7 @@ export default function ProductsPage({ readOnly = false }: ProductsPageProps) {
         </div>
       )}
 
-      {showImportModal && (
+      {showImportModal && !readOnly && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
