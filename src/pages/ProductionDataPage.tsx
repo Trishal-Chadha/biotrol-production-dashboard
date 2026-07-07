@@ -35,7 +35,6 @@ const emptyForm = () => ({
   entry_date: todayIso(),
   product_id: '',
   batch_number: '',
-  produced_units: '',
   produced_sheets: '',
   target_sheets: '',
   production_employees: '',
@@ -62,15 +61,12 @@ function validate(f: FormState): FieldErrors {
   if (!f.entry_date) e.entry_date = 'Required';
   if (!f.product_id) e.product_id = 'Required';
   if (!f.batch_number.trim()) e.batch_number = 'Required';
-  if (f.produced_units === '') e.produced_units = 'Required';
-  else if (Number(f.produced_units) < 0) e.produced_units = 'Must be ≥ 0';
   if (f.produced_sheets === '') e.produced_sheets = 'Required';
   else if (Number(f.produced_sheets) < 0) e.produced_sheets = 'Must be ≥ 0';
   if (f.target_sheets === '') e.target_sheets = 'Required';
   else if (Number(f.target_sheets) < 0) e.target_sheets = 'Must be ≥ 0';
   if (f.production_employees === '') e.production_employees = 'Required';
   else if (Number(f.production_employees) < 0) e.production_employees = 'Must be ≥ 0';
-  if (f.pkg_incharge_id === '') e.pkg_incharge_id = 'Required';
   if (f.test_pouch_produced === '') e.test_pouch_produced = 'Required';
   else if (Number(f.test_pouch_produced) < 0) e.test_pouch_produced = 'Must be ≥ 0';
   if (f.pkg_employees !== '' && Number(f.pkg_employees) < 0) e.pkg_employees = 'Must be ≥ 0';
@@ -131,7 +127,6 @@ function Field({
     <div>
       <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
         {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {children}
       {error && (
@@ -184,8 +179,7 @@ function ViewModal({ record, products, employees, onClose }: {
             <Row label="Date" value={fmtDate(record.entry_date)} />
             <Row label="Product" value={prod?.name} />
             <Row label="Batch Number" value={record.batch_number} />
-            <Row label="Produced Units" value={record.produced_units.toLocaleString()} />
-            <Row label="Produced Sheets" value={record.produced_sheets.toLocaleString()} />
+            <Row label="No. Sheets Produced" value={record.produced_sheets.toLocaleString()} />
             <Row label="Target Sheets" value={record.target_sheets.toLocaleString()} />
             <Row label="Production Employees" value={record.production_employees} />
             <Row label="Production Incharge" value={prodIncharge?.name} />
@@ -257,7 +251,7 @@ export default function ProductionDataPage() {
   useEffect(() => {
     async function init() {
       const [{ data: prod }, { data: emp }] = await Promise.all([
-        supabase.from('products').select('*').order('name'),
+        supabase.from('products').select('*').eq('active', true).order('name'),
         supabase.from('employees').select('*').eq('active', true).order('name'),
       ]);
       if (prod) setProducts(prod);
@@ -317,7 +311,6 @@ export default function ProductionDataPage() {
       entry_date: r.entry_date,
       product_id: r.product_id ?? '',
       batch_number: r.batch_number,
-      produced_units: String(r.produced_units),
       produced_sheets: String(r.produced_sheets),
       target_sheets: String(r.target_sheets),
       production_employees: String(r.production_employees),
@@ -361,7 +354,6 @@ export default function ProductionDataPage() {
       entry_date: form.entry_date,
       product_id: form.product_id || null,
       batch_number: form.batch_number.trim(),
-      produced_units: Number(form.produced_units),
       produced_sheets: Number(form.produced_sheets),
       target_sheets: Number(form.target_sheets),
       production_employees: Number(form.production_employees),
@@ -511,7 +503,7 @@ export default function ProductionDataPage() {
               <tr className="bg-gray-50/80 border-b border-gray-100">
                 {[
                   'Date', 'Product', 'Batch Number',
-                  'Produced Units', 'Produced Sheets', 'Target Sheets',
+                  'No. Sheets Produced', 'Target Sheets',
                   'Employees (Prod.)', 'Production Incharge', 'Actions',
                 ].map(h => (
                   <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap ${h === 'Actions' ? 'text-right' : 'text-left'}`}>
@@ -523,7 +515,7 @@ export default function ProductionDataPage() {
             <tbody className="divide-y divide-gray-50">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-16">
+                  <td colSpan={8} className="text-center py-16">
                     <div className="flex flex-col items-center gap-2 text-gray-400">
                       <div className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
                       <span className="text-xs">Loading records...</span>
@@ -532,7 +524,7 @@ export default function ProductionDataPage() {
                 </tr>
               ) : paginated.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-16 text-sm text-gray-400">
+                  <td colSpan={8} className="text-center py-16 text-sm text-gray-400">
                     {records.length === 0 ? 'No production records yet. Click "+ New Entry" to create one.' : 'No records match your filters.'}
                   </td>
                 </tr>
@@ -545,7 +537,6 @@ export default function ProductionDataPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{r.batch_number}</td>
-                  <td className="px-4 py-3 text-gray-700 tabular-nums">{r.produced_units.toLocaleString()}</td>
                   <td className="px-4 py-3 text-gray-700 tabular-nums">{r.produced_sheets.toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
@@ -700,11 +691,8 @@ export default function ProductionDataPage() {
             </div>
 
             {/* Row 2 */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <Field label="No. Produced Units" required error={E.produced_units}>
-                <input type="number" min="0" className={inp} placeholder="0" value={form.produced_units} onChange={e => setF({ produced_units: e.target.value })} />
-              </Field>
-              <Field label="No. of Produced Sheets" required error={E.produced_sheets}>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <Field label="No. Sheets Produced" required error={E.produced_sheets}>
                 <input type="number" min="0" className={inp} placeholder="0" value={form.produced_sheets} onChange={e => setF({ produced_sheets: e.target.value })} />
               </Field>
               <Field label="No. Target Sheets" required error={E.target_sheets}>

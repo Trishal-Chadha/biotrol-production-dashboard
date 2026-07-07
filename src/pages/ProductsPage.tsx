@@ -70,6 +70,11 @@ export default function ProductsPage() {
     fetchProducts();
   }
 
+  async function toggleActive(p: Product) {
+    await supabase.from('products').update({ active: !p.active }).eq('id', p.id);
+    fetchProducts();
+  }
+
   return (
     <div>
       <PageHeader
@@ -95,7 +100,7 @@ export default function ProductsPage() {
           </div>
           <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Product Name <span className="text-red-400">*</span></label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Product Name</label>
               <input
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
                 value={form.name}
@@ -170,20 +175,34 @@ export default function ProductsPage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Code</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
-                <tr><td colSpan={5} className="text-center py-10 text-sm text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={6} className="text-center py-10 text-sm text-gray-400">Loading...</td></tr>
               ) : products.length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-10 text-sm text-gray-400">No products yet. Add your first product.</td></tr>
+                <tr><td colSpan={6} className="text-center py-10 text-sm text-gray-400">No products yet. Add your first product.</td></tr>
               ) : products.map(p => (
                 <tr key={p.id} className="hover:bg-gray-50/60 transition-colors">
                   <td className="px-4 py-3 font-medium text-gray-800">{p.name}</td>
                   <td className="px-4 py-3 text-gray-500">{p.code ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500">{p.category ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500">{p.unit ?? '—'}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => toggleActive(p)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                        p.active
+                          ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${p.active ? 'bg-green-500' : 'bg-gray-400'}`} />
+                      {p.active ? 'Active' : 'Inactive'}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button

@@ -12,6 +12,7 @@ export type Product = {
   category: string | null;
   unit: string | null;
   description: string | null;
+  active: boolean;
   created_at: string;
 };
 
