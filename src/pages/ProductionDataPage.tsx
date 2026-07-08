@@ -31,19 +31,43 @@ const inp =
 
 // ─── empty form ───────────────────────────────────────────────────────────────
 
-const emptyForm = () => ({
-  entry_date: todayIso(),
+interface ProductRow {
+  product_id: string;
+  batch_number: string;
+  produced_sheets: string;
+  target_sheets: string;
+  production_incharge_id: string;
+  production_remarks: string;
+}
+
+const emptyProductRow = (): ProductRow => ({
   product_id: '',
   batch_number: '',
   produced_sheets: '',
   target_sheets: '',
-  production_employees: '',
   production_incharge_id: '',
   production_remarks: '',
-  pkg_product_id: '',
+});
+
+interface PackagingRow {
+  product_id: string;
+  pouches: string;
+  remarks: string;
+}
+
+const emptyPackagingRow = (): PackagingRow => ({
+  product_id: '',
+  pouches: '',
+  remarks: '',
+});
+
+const emptyForm = () => ({
+  entry_date: todayIso(),
+  productRows: [emptyProductRow(), emptyProductRow(), emptyProductRow()],
+  production_employees: '',
+  pkgRows: [emptyPackagingRow(), emptyPackagingRow(), emptyPackagingRow()],
   pkg_employees: '',
   pkg_incharge_id: '',
-  pkg_remarks: '',
   test_pouch_produced: '',
   day_remarks: '',
 });
@@ -59,16 +83,15 @@ interface FieldErrors {
 function validate(f: FormState): FieldErrors {
   const e: FieldErrors = {};
   if (!f.entry_date) e.entry_date = 'Required';
-  if (!f.product_id) e.product_id = 'Required';
-  if (!f.batch_number.trim()) e.batch_number = 'Required';
-  if (f.produced_sheets === '') e.produced_sheets = 'Required';
-  else if (Number(f.produced_sheets) < 0) e.produced_sheets = 'Must be ≥ 0';
-  if (f.target_sheets === '') e.target_sheets = 'Required';
-  else if (Number(f.target_sheets) < 0) e.target_sheets = 'Must be ≥ 0';
-  if (f.production_employees === '') e.production_employees = 'Required';
-  else if (Number(f.production_employees) < 0) e.production_employees = 'Must be ≥ 0';
-  if (f.test_pouch_produced === '') e.test_pouch_produced = 'Required';
-  else if (Number(f.test_pouch_produced) < 0) e.test_pouch_produced = 'Must be ≥ 0';
+  f.productRows.forEach((row, idx) => {
+    if (row.produced_sheets !== '' && Number(row.produced_sheets) < 0) e[`row_${idx}_produced_sheets`] = 'Must be ≥ 0';
+    if (row.target_sheets !== '' && Number(row.target_sheets) < 0) e[`row_${idx}_target_sheets`] = 'Must be ≥ 0';
+  });
+  f.pkgRows.forEach((row, idx) => {
+    if (row.pouches !== '' && Number(row.pouches) < 0) e[`pkg_${idx}_pouches`] = 'Must be ≥ 0';
+  });
+  if (f.production_employees !== '' && Number(f.production_employees) < 0) e.production_employees = 'Must be ≥ 0';
+  if (f.test_pouch_produced !== '' && Number(f.test_pouch_produced) < 0) e.test_pouch_produced = 'Must be ≥ 0';
   if (f.pkg_employees !== '' && Number(f.pkg_employees) < 0) e.pkg_employees = 'Must be ≥ 0';
   return e;
 }
@@ -116,10 +139,9 @@ function SectionCard({ number, title, children }: { number: string; title: strin
 // ─── form field wrapper ───────────────────────────────────────────────────────
 
 function Field({
-  label, required, error, children,
+  label, error, children,
 }: {
   label: string;
-  required?: boolean;
   error?: string;
   children: React.ReactNode;
 }) {
@@ -147,7 +169,13 @@ function ViewModal({ record, products, employees, onClose }: {
   onClose: () => void;
 }) {
   const prod = products.find(p => p.id === record.product_id);
-  const pkgProd = products.find(p => p.id === record.pkg_product_id);
+  const pkgProds = [
+    products.find(p => p.id === record.pkg_product_id),
+    products.find(p => p.id === record.pkg_product_id_2),
+    products.find(p => p.id === record.pkg_product_id_3),
+  ];
+  const pkgPouches = [record.pkg_pouches, record.pkg_pouches_2, record.pkg_pouches_3];
+  const pkgRemarks = [record.pkg_remarks, record.pkg_remarks_2, record.pkg_remarks_3];
   const prodIncharge = employees.find(e => e.id === record.production_incharge_id);
   const pkgIncharge = employees.find(e => e.id === record.pkg_incharge_id);
 
@@ -187,10 +215,17 @@ function ViewModal({ record, products, employees, onClose }: {
           </div>
           <div>
             <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2">Packaging</p>
-            <Row label="Product" value={pkgProd?.name} />
             <Row label="Packaging Employees" value={record.pkg_employees} />
             <Row label="Packaging Incharge" value={pkgIncharge?.name} />
-            {record.pkg_remarks && <Row label="Remarks" value={record.pkg_remarks} />}
+            {[0, 1, 2].map(i => (pkgProds[i] || pkgPouches[i] != null || pkgRemarks[i]) && (
+              <div key={i} className="pt-2 first:pt-0">
+                {i > 0 && <div className="border-t border-gray-100 my-2" />}
+                <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Product {i + 1}</p>
+                <Row label="Product" value={pkgProds[i]?.name} />
+                <Row label="No. of Pouches" value={pkgPouches[i]} />
+                {pkgRemarks[i] && <Row label="Remarks" value={pkgRemarks[i]} />}
+              </div>
+            ))}
           </div>
           <div>
             <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2">Final Details</p>
@@ -309,17 +344,26 @@ export default function ProductionDataPage() {
   function openEdit(r: ProductionData) {
     setForm({
       entry_date: r.entry_date,
-      product_id: r.product_id ?? '',
-      batch_number: r.batch_number,
-      produced_sheets: String(r.produced_sheets),
-      target_sheets: String(r.target_sheets),
+      productRows: [
+        {
+          product_id: r.product_id ?? '',
+          batch_number: r.batch_number,
+          produced_sheets: String(r.produced_sheets),
+          target_sheets: String(r.target_sheets),
+          production_incharge_id: r.production_incharge_id ?? '',
+          production_remarks: r.production_remarks ?? '',
+        },
+        emptyProductRow(),
+        emptyProductRow(),
+      ],
       production_employees: String(r.production_employees),
-      production_incharge_id: r.production_incharge_id ?? '',
-      production_remarks: r.production_remarks ?? '',
-      pkg_product_id: r.pkg_product_id ?? '',
+      pkgRows: [
+        { product_id: r.pkg_product_id ?? '', pouches: r.pkg_pouches != null ? String(r.pkg_pouches) : '', remarks: r.pkg_remarks ?? '' },
+        { product_id: r.pkg_product_id_2 ?? '', pouches: r.pkg_pouches_2 != null ? String(r.pkg_pouches_2) : '', remarks: r.pkg_remarks_2 ?? '' },
+        { product_id: r.pkg_product_id_3 ?? '', pouches: r.pkg_pouches_3 != null ? String(r.pkg_pouches_3) : '', remarks: r.pkg_remarks_3 ?? '' },
+      ],
       pkg_employees: r.pkg_employees != null ? String(r.pkg_employees) : '',
       pkg_incharge_id: r.pkg_incharge_id ?? '',
-      pkg_remarks: r.pkg_remarks ?? '',
       test_pouch_produced: String(r.test_pouch_produced),
       day_remarks: r.day_remarks ?? '',
     });
@@ -342,6 +386,20 @@ export default function ProductionDataPage() {
     setForm(f => ({ ...f, ...patch }));
   }
 
+  function setRow(idx: number, patch: Partial<ProductRow>) {
+    setForm(f => ({
+      ...f,
+      productRows: f.productRows.map((r, i) => i === idx ? { ...r, ...patch } : r),
+    }));
+  }
+
+  function setPkgRow(idx: number, patch: Partial<PackagingRow>) {
+    setForm(f => ({
+      ...f,
+      pkgRows: f.pkgRows.map((r, i) => i === idx ? { ...r, ...patch } : r),
+    }));
+  }
+
   // ── save ─────────────────────────────────────────────────────────────────
 
   async function handleSave(andNew = false) {
@@ -350,32 +408,66 @@ export default function ProductionDataPage() {
     setSaving(true);
     setFieldErrors({});
 
-    const payload = {
-      entry_date: form.entry_date,
-      product_id: form.product_id || null,
-      batch_number: form.batch_number.trim(),
-      produced_sheets: Number(form.produced_sheets),
-      target_sheets: Number(form.target_sheets),
-      production_employees: Number(form.production_employees),
-      production_incharge_id: form.production_incharge_id || null,
-      production_remarks: form.production_remarks.trim() || null,
-      pkg_product_id: form.pkg_product_id || null,
+    const numOrZero = (v: string) => v === '' ? 0 : Number(v) || 0;
+
+    const packagingFields = {
       pkg_employees: form.pkg_employees !== '' ? Number(form.pkg_employees) : null,
       pkg_incharge_id: form.pkg_incharge_id || null,
-      pkg_remarks: form.pkg_remarks.trim() || null,
-      test_pouch_produced: Number(form.test_pouch_produced),
-      day_remarks: form.day_remarks.trim() || null,
+      pkg_product_id: form.pkgRows[0].product_id || null,
+      pkg_pouches: form.pkgRows[0].pouches !== '' ? Number(form.pkgRows[0].pouches) : null,
+      pkg_remarks: form.pkgRows[0].remarks.trim() || null,
+      pkg_product_id_2: form.pkgRows[1].product_id || null,
+      pkg_pouches_2: form.pkgRows[1].pouches !== '' ? Number(form.pkgRows[1].pouches) : null,
+      pkg_remarks_2: form.pkgRows[1].remarks.trim() || null,
+      pkg_product_id_3: form.pkgRows[2].product_id || null,
+      pkg_pouches_3: form.pkgRows[2].pouches !== '' ? Number(form.pkgRows[2].pouches) : null,
+      pkg_remarks_3: form.pkgRows[2].remarks.trim() || null,
     };
 
-    let err;
-    if (editId) {
-      ({ error: err } = await supabase.from('production_data').update(payload).eq('id', editId));
-    } else {
-      ({ error: err } = await supabase.from('production_data').insert(payload));
-    }
+    const commonFields = {
+      entry_date: form.entry_date || todayIso(),
+      production_employees: numOrZero(form.production_employees),
+      test_pouch_produced: numOrZero(form.test_pouch_produced),
+      day_remarks: form.day_remarks.trim() || null,
+      ...packagingFields,
+    };
 
-    setSaving(false);
-    if (err) { setFieldErrors({ _root: err.message }); return; }
+    if (editId) {
+      const row = form.productRows[0];
+      const payload = {
+        ...commonFields,
+        product_id: row.product_id || null,
+        batch_number: row.batch_number.trim(),
+        produced_sheets: numOrZero(row.produced_sheets),
+        produced_units: numOrZero(row.produced_sheets),
+        target_sheets: numOrZero(row.target_sheets),
+        production_incharge_id: row.production_incharge_id || null,
+        production_remarks: row.production_remarks.trim() || null,
+      };
+      const { error: err } = await supabase.from('production_data').update(payload).eq('id', editId);
+      setSaving(false);
+      if (err) { setFieldErrors({ _root: err.message }); return; }
+    } else {
+      const rowsWithData = form.productRows.filter(row =>
+        row.product_id || row.produced_sheets !== '' || row.batch_number.trim()
+      );
+      const insertRows = rowsWithData.length > 0 ? rowsWithData : [form.productRows[0]];
+
+      const payloads = insertRows.map(row => ({
+        ...commonFields,
+        product_id: row.product_id || null,
+        batch_number: row.batch_number.trim(),
+        produced_sheets: numOrZero(row.produced_sheets),
+        produced_units: numOrZero(row.produced_sheets),
+        target_sheets: numOrZero(row.target_sheets),
+        production_incharge_id: row.production_incharge_id || null,
+        production_remarks: row.production_remarks.trim() || null,
+      }));
+
+      const { error: err } = await supabase.from('production_data').insert(payloads);
+      setSaving(false);
+      if (err) { setFieldErrors({ _root: err.message }); return; }
+    }
 
     fetchRecords();
 
@@ -674,69 +766,68 @@ export default function ProductionDataPage() {
 
           {/* ── CARD 1: PRODUCTION ──────────────────────────────────── */}
           <SectionCard number="1" title="Production">
-            {/* Row 1 */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <Field label="Product" required error={E.product_id}>
-                <select className={inp} value={form.product_id} onChange={e => setF({ product_id: e.target.value })}>
-                  <option value="">— Select Product —</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Date" required error={E.entry_date}>
+            {/* Shared fields */}
+            <div className="grid grid-cols-2 gap-4 mb-5">
+              <Field label="Date">
                 <input type="date" className={inp} value={form.entry_date} onChange={e => setF({ entry_date: e.target.value })} />
               </Field>
-              <Field label="Batch Number" required error={E.batch_number}>
-                <input className={inp} placeholder="e.g. BT-2024-001" value={form.batch_number} onChange={e => setF({ batch_number: e.target.value })} />
-              </Field>
-            </div>
-
-            {/* Row 2 */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="No. Sheets Produced" required error={E.produced_sheets}>
-                <input type="number" min="0" className={inp} placeholder="0" value={form.produced_sheets} onChange={e => setF({ produced_sheets: e.target.value })} />
-              </Field>
-              <Field label="No. Target Sheets" required error={E.target_sheets}>
-                <input type="number" min="0" className={inp} placeholder="0" value={form.target_sheets} onChange={e => setF({ target_sheets: e.target.value })} />
-              </Field>
-            </div>
-
-            {/* Row 3 */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <Field label="Employees in Production" required error={E.production_employees}>
+              <Field label="Employees in Production">
                 <input type="number" min="0" className={inp} placeholder="0" value={form.production_employees} onChange={e => setF({ production_employees: e.target.value })} />
               </Field>
             </div>
 
-            {/* Row 4 */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <Field label="Production Incharge" error={E.production_incharge_id}>
-                <select className={inp} value={form.production_incharge_id} onChange={e => setF({ production_incharge_id: e.target.value })}>
-                  <option value="">— Select —</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </Field>
-            </div>
-
-            {/* Row 5 */}
-            <Field label="Remarks">
-              <textarea
-                className={`${inp} resize-none`}
-                rows={3}
-                placeholder="Optional production remarks..."
-                value={form.production_remarks}
-                onChange={e => setF({ production_remarks: e.target.value })}
-              />
-            </Field>
+            {/* Product rows */}
+            {form.productRows.map((row, idx) => (
+              <div key={idx} className={idx > 0 ? 'mt-5 pt-5 border-t border-gray-100' : ''}>
+                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">Product {idx + 1}</p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <Field label="Product">
+                    <select className={inp} value={row.product_id} onChange={e => setRow(idx, { product_id: e.target.value })}>
+                      <option value="">— Select Product —</option>
+                      {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Batch Number">
+                    <input className={inp} placeholder="e.g. BT-2024-001" value={row.batch_number} onChange={e => setRow(idx, { batch_number: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <Field label="No. Sheets Produced">
+                    <input type="number" min="0" className={inp} placeholder="0" value={row.produced_sheets} onChange={e => setRow(idx, { produced_sheets: e.target.value })} />
+                  </Field>
+                  <Field label="No. Target Sheets">
+                    <input type="number" min="0" className={inp} placeholder="0" value={row.target_sheets} onChange={e => setRow(idx, { target_sheets: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <Field label="Production Incharge">
+                    <select className={inp} value={row.production_incharge_id} onChange={e => setRow(idx, { production_incharge_id: e.target.value })}>
+                      <option value="">— Select —</option>
+                      {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Remarks">
+                  <textarea
+                    className={`${inp} resize-none`}
+                    rows={2}
+                    placeholder="Optional production remarks..."
+                    value={row.production_remarks}
+                    onChange={e => setRow(idx, { production_remarks: e.target.value })}
+                  />
+                </Field>
+              </div>
+            ))}
           </SectionCard>
 
           {/* ── CARD 2: PACKAGING ───────────────────────────────────── */}
           <SectionCard number="2" title="Packaging">
-            {/* Row 1 */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="Product" error={E.pkg_product_id}>
-                <select className={inp} value={form.pkg_product_id} onChange={e => setF({ pkg_product_id: e.target.value })}>
-                  <option value="">— Select Product —</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {/* Shared staffing fields at top */}
+            <div className="grid grid-cols-2 gap-4 mb-5">
+              <Field label="Packaging Incharge" error={E.pkg_incharge_id}>
+                <select className={inp} value={form.pkg_incharge_id} onChange={e => setF({ pkg_incharge_id: e.target.value })}>
+                  <option value="">— Select —</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </Field>
               <Field label="Employees in Packaging" error={E.pkg_employees}>
@@ -744,32 +835,38 @@ export default function ProductionDataPage() {
               </Field>
             </div>
 
-            {/* Row 2 */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="Packaging Incharge" required error={E.pkg_incharge_id}>
-                <select className={inp} value={form.pkg_incharge_id} onChange={e => setF({ pkg_incharge_id: e.target.value })}>
-                  <option value="">— Select —</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </Field>
-            </div>
-
-            {/* Row 3 */}
-            <Field label="Remarks">
-              <textarea
-                className={`${inp} resize-none`}
-                rows={3}
-                placeholder="Optional packaging remarks..."
-                value={form.pkg_remarks}
-                onChange={e => setF({ pkg_remarks: e.target.value })}
-              />
-            </Field>
+            {/* Packaging product sections */}
+            {form.pkgRows.map((row, idx) => (
+              <div key={idx} className={idx > 0 ? 'mt-5 pt-5 border-t border-gray-100' : ''}>
+                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">Product {idx + 1}</p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <Field label="Product">
+                    <select className={inp} value={row.product_id} onChange={e => setPkgRow(idx, { product_id: e.target.value })}>
+                      <option value="">— Select Product —</option>
+                      {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="No. of Pouches" error={E[`pkg_${idx}_pouches`]}>
+                    <input type="number" min="0" className={inp} placeholder="0" value={row.pouches} onChange={e => setPkgRow(idx, { pouches: e.target.value })} />
+                  </Field>
+                </div>
+                <Field label="Remarks">
+                  <textarea
+                    className={`${inp} resize-none`}
+                    rows={2}
+                    placeholder="Optional packaging remarks..."
+                    value={row.remarks}
+                    onChange={e => setPkgRow(idx, { remarks: e.target.value })}
+                  />
+                </Field>
+              </div>
+            ))}
           </SectionCard>
 
           {/* ── CARD 3: FINAL DETAILS ───────────────────────────────── */}
           <SectionCard number="3" title="Final Details">
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="No. of Test / Pouch Produced" required error={E.test_pouch_produced}>
+              <Field label="No. of Test / Pouch Produced" error={E.test_pouch_produced}>
                 <input type="number" min="0" className={inp} placeholder="0" value={form.test_pouch_produced} onChange={e => setF({ test_pouch_produced: e.target.value })} />
               </Field>
             </div>
