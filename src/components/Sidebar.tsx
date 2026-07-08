@@ -50,14 +50,19 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         ...(user?.role === 'admin' ? [{ id: 'employees' as Page, label: 'Employees', icon: <Users size={18} /> }] : []),
       ],
     },
-    {
+    ...((user?.role === 'admin' || user?.role === 'employee') ? [{
       heading: 'Production & Packaging',
       items: [
-        { id: 'production-data', label: 'Production Data', icon: <ClipboardList size={18} /> },
-        { id: 'production-analysis', label: 'Production Analysis', icon: <BarChart2 size={18} /> },
-        { id: 'production-comparison', label: 'Comparison Analysis', icon: <BarChart3 size={18} /> },
+        { id: 'production-data' as Page, label: 'Production Data', icon: <ClipboardList size={18} /> },
+        { id: 'production-analysis' as Page, label: 'Production Analysis', icon: <BarChart2 size={18} /> },
+        { id: 'production-comparison' as Page, label: 'Comparison Analysis', icon: <BarChart3 size={18} /> },
       ],
-    },
+    }] : [{
+      heading: 'Production & Packaging',
+      items: [
+        { id: 'production-analysis' as Page, label: 'Production Analysis', icon: <BarChart2 size={18} /> },
+      ],
+    }]),
     ...(user?.role === 'admin' ? [{
       heading: 'Administration',
       items: [
@@ -125,9 +130,9 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
           <p className="text-xs text-white/70 truncate">{user?.email}</p>
           <p className="text-[10px] font-semibold uppercase tracking-wide mt-0.5">
             <span className={`${
-              user?.role === 'admin' ? 'text-blue-300' : 'text-emerald-300'
+              user?.role === 'admin' ? 'text-blue-300' : user?.role === 'viewer' ? 'text-amber-300' : 'text-emerald-300'
             }`}>
-              {user?.role === 'admin' ? 'Administrator' : 'Employee'}
+              {user?.role === 'admin' ? 'Administrator' : user?.role === 'viewer' ? 'Viewer' : 'Employee'}
             </span>
           </p>
         </div>

@@ -21,31 +21,42 @@ function ProtectedPage({
   activePage: Page;
   setActivePage: (p: Page) => void;
 }) {
-  const { user, isAdmin, isEmployee } = useAuth();
+  const { isAdmin, isEmployee, isViewer } = useAuth();
 
-  // Check if employee is trying to access restricted pages
-  if (isEmployee) {
-    // Employees have read-only access to products
+  // Viewer: read-only access to Dashboard, Products, Production Analysis only
+  if (isViewer) {
+    if (page === 'dashboard') {
+      return <DashboardPage onNavigate={p => setActivePage(p as Page)} />;
+    }
     if (page === 'products') {
       return <ProductsPage readOnly={true} />;
     }
-    // Employees can access production-data (with their own permissions)
-    if (page === 'production-data') {
-      return <ProductionDataPage />;
-    }
-    // Employees have read-only access to production-analysis
     if (page === 'production-analysis') {
       return <ProductionAnalysisPage />;
     }
-    // Employees have read-only access to production-comparison
+    return <AccessDenied message="You don't have permission to access this page." />;
+  }
+
+  // Employee access
+  if (isEmployee) {
+    if (page === 'dashboard') {
+      return <DashboardPage onNavigate={p => setActivePage(p as Page)} />;
+    }
+    if (page === 'products') {
+      return <ProductsPage readOnly={true} />;
+    }
+    if (page === 'production-data') {
+      return <ProductionDataPage />;
+    }
+    if (page === 'production-analysis') {
+      return <ProductionAnalysisPage />;
+    }
     if (page === 'production-comparison') {
       return <ProductionComparisonPage />;
     }
-    // Employees can't access employees page
     if (page === 'employees') {
       return <AccessDenied message="You don't have permission to access the Employees page." />;
     }
-    // Employees can't access settings page
     if (page === 'settings') {
       return <AccessDenied message="You don't have permission to access the Settings page." />;
     }
@@ -145,9 +156,13 @@ function AppContent() {
             <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg">
               <span className="text-xs font-medium text-gray-600">{user.email}</span>
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                user.role === 'admin' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+                user.role === 'admin'
+                  ? 'bg-blue-100 text-blue-700'
+                  : user.role === 'viewer'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-emerald-100 text-emerald-700'
               }`}>
-                {user.role === 'admin' ? 'Admin' : 'Employee'}
+                {user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Viewer' : 'Employee'}
               </span>
             </div>
           </div>
