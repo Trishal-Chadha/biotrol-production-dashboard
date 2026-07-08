@@ -104,6 +104,8 @@ export default function SettingsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
   // Fetch settings
   useEffect(() => {
@@ -127,6 +129,9 @@ export default function SettingsPage() {
         setDailyTarget(data.default_daily_target || 1000);
         if (data.theme) {
           setTheme(data.theme as 'light' | 'dark' | 'system');
+        }
+        if (data.company_logo_url) {
+          setLogoPreview(data.company_logo_url);
         }
       }
       setLoading(false);
@@ -173,6 +178,104 @@ export default function SettingsPage() {
       .from('settings')
       .update({ theme: newTheme, updated_by: user?.id })
       .eq('id', settings?.id);
+  };
+
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Logo file size must be less than 2MB');
+      return;
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file');
+      return;
+    }
+
+    setLogoFile(file);
+
+    // Create preview
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setLogoPreview(event.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleLogoUpload = async () => {
+    if (!logoFile || !settings) return;
+
+    setSaving(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      // Read file as base64
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(logoFile);
+      });
+
+      const base64Logo = await base64Promise;
+
+      // Save to settings
+      const { error: updateError } = await supabase
+        .from('settings')
+        .update({
+          company_logo_url: base64Logo,
+          updated_by: user?.id,
+        })
+        .eq('id', settings.id);
+
+      if (updateError) {
+        setError(updateError.message);
+      } else {
+        setSuccess('Logo uploaded successfully!');
+        setLogoFile(null);
+        // Refresh settings
+        const { data } = await supabase.from('settings').select('*').maybeSingle();
+        if (data) setSettings(data as Settings);
+      }
+    } catch (err) {
+      setError('Failed to upload logo. Please try again.');
+    }
+
+    setSaving(false);
+  };
+
+  const handleRemoveLogo = async () => {
+    if (!settings) return;
+
+    setSaving(true);
+    setError('');
+    setSuccess('');
+
+    const { error: updateError } = await supabase
+      .from('settings')
+      .update({
+        company_logo_url: null,
+        updated_by: user?.id,
+      })
+      .eq('id', settings.id);
+
+    if (updateError) {
+      setError(updateError.message);
+    } else {
+      setSuccess('Logo removed successfully!');
+      setLogoFile(null);
+      setLogoPreview(null);
+      // Refresh settings
+      const { data } = await supabase.from('settings').select('*').maybeSingle();
+      if (data) setSettings(data as Settings);
+    }
+
+    setSaving(false);
   };
 
   const handleBackup = async () => {
@@ -370,8 +473,6 @@ export default function SettingsPage() {
     await signOut();
   };
 
-  const logoUrl = settings?.company_logo_url;
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -412,27 +513,47 @@ export default function SettingsPage() {
               <SettingRow label="Company Logo">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 bg-blue-50 rounded-xl flex items-center justify-center border-2 border-dashed border-blue-200 overflow-hidden">
-                    {logoUrl ? (
-                      <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                    {logoPreview ? (
+                      <img src={logoPreview} alt="Logo" className="w-full h-full object-contain" />
                     ) : (
                       <Building2 size={24} className="text-blue-300" />
                     )}
                   </div>
-                  <div>
+                  <div className="flex flex-col gap-2">
                     <input
                       ref={logoInputRef}
                       type="file"
                       accept="image/*"
                       className="hidden"
-                      onChange={() => {}}
+                      onChange={handleLogoSelect}
                     />
-                    <button
-                      onClick={() => logoInputRef.current?.click()}
-                      className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors border border-blue-200"
-                    >
-                      <Upload size={12} /> Upload Logo
-                    </button>
-                    <p className="text-[10px] text-gray-400 mt-1">PNG, JPG up to 2MB</p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => logoInputRef.current?.click()}
+                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors border border-blue-200"
+                      >
+                        <Upload size={12} /> {logoPreview ? 'Change Logo' : 'Upload Logo'}
+                      </button>
+                      {logoFile && (
+                        <button
+                          onClick={handleLogoUpload}
+                          disabled={saving}
+                          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-60"
+                        >
+                          <Save size={12} /> Save Logo
+                        </button>
+                      )}
+                      {logoPreview && !logoFile && (
+                        <button
+                          onClick={handleRemoveLogo}
+                          disabled={saving}
+                          className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors border border-red-200 disabled:opacity-60"
+                        >
+                          <X size={12} /> Remove
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-gray-400">PNG, JPG up to 2MB</p>
                   </div>
                 </div>
               </SettingRow>
