@@ -222,7 +222,7 @@ function ViewModal({ record, products, employees, onClose }: {
                 {i > 0 && <div className="border-t border-gray-100 my-2" />}
                 <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Product {i + 1}</p>
                 <Row label="Product" value={pkgProds[i]?.name} />
-                <Row label="No. of Pouches" value={pkgPouches[i]} />
+                <Row label="No. of Tests" value={pkgPouches[i]} />
                 {pkgRemarks[i] && <Row label="Remarks" value={pkgRemarks[i]} />}
               </div>
             ))}
@@ -846,7 +846,7 @@ export default function ProductionDataPage() {
                       {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </Field>
-                  <Field label="No. of Pouches" error={E[`pkg_${idx}_pouches`]}>
+                  <Field label="No. of Tests" error={E[`pkg_${idx}_pouches`]}>
                     <input type="number" min="0" className={inp} placeholder="0" value={row.pouches} onChange={e => setPkgRow(idx, { pouches: e.target.value })} />
                   </Field>
                 </div>
