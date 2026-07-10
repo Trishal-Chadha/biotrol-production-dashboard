@@ -1,391 +1,325 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Calendar, TrendingUp, TrendingDown, Package2, Layers, Users, Target, CheckCircle2 } from 'lucide-react';
-import { supabase, ProductionData, Product } from '../lib/supabase';
+import React, { useEffect, useState } from 'react';
+import { Plus, Pencil, Trash2, X, Check, Users, AlertCircle } from 'lucide-react';
+import { supabase, Employee } from '../lib/supabase';
 import PageHeader from '../components/PageHeader';
 
-// ─── date helpers ─────────────────────────────────────────────────────────────
+const ROLES = [
+  'Production Incharge',
+  'Packaging Incharge',
+  'Supervisor',
+  'Operator',
+  'Quality Control',
+  'Manager',
+  'Other',
+];
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const inp =
+  'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all bg-white placeholder:text-gray-400';
 
-function startOfWeek(d = new Date()) {
-  const day = d.getDay();
-  const n = new Date(d);
-  n.setDate(n.getDate() - day + (day === 0 ? -6 : 1));
-  return n.toISOString().slice(0, 10);
-}
+const emptyForm = { name: '', role: '', active: true };
 
-function startOfMonth(d = new Date()) {
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
-}
-
-function fmtShort(d: string) {
-  const [, m, day] = d.split('-');
-  return `${day}/${m}`;
-}
-
-function fmtMonth(ym: string) {
-  const d = new Date(ym + '-01');
-  return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
-}
-
-// ─── SVG bar chart ─────────────────────────────────────────────────────────────
-
-function BarChart({ data, color = '#2563eb', height = 130 }: {
-  data: { label: string; value: number }[];
-  color?: string;
-  height?: number;
-}) {
-  if (!data.length) return <p className="text-xs text-gray-400 text-center py-8">No data for this period.</p>;
-  const max = Math.max(...data.map(d => d.value), 1);
-  const barW = Math.max(10, Math.min(44, Math.floor(540 / data.length) - 6));
-  const gap = Math.max(4, Math.floor(540 / data.length) - barW);
-  const totalW = data.length * (barW + gap) - gap;
-  const svgH = height + 30;
-  return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${Math.max(totalW, 280)} ${svgH}`} className="w-full" preserveAspectRatio="none">
-        {data.map((d, i) => {
-          const bh = Math.max(2, (d.value / max) * height);
-          const x = i * (barW + gap);
-          const y = height - bh;
-          return (
-            <g key={i}>
-              <rect x={x} y={y} width={barW} height={bh} rx={3} fill={color} fillOpacity={0.8} />
-              {d.value > 0 && (
-                <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={8} fill="#6b7280" fontWeight="600">
-                  {d.value.toLocaleString()}
-                </text>
-              )}
-              <text x={x + barW / 2} y={svgH - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">{d.label}</text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-// ─── SVG multi-bar chart ──────────────────────────────────────────────────────
-
-function MultiBarChart({ data, height = 130 }: {
-  data: { label: string; produced: number; target: number }[];
-  height?: number;
-}) {
-  if (!data.length) return <p className="text-xs text-gray-400 text-center py-8">No data for this period.</p>;
-  const max = Math.max(...data.flatMap(d => [d.produced, d.target]), 1);
-  const slotW = Math.max(24, Math.min(80, Math.floor(540 / data.length)));
-  const barW = Math.floor(slotW * 0.38);
-  const totalW = data.length * slotW;
-  const svgH = height + 30;
-  return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${Math.max(totalW, 280)} ${svgH}`} className="w-full" preserveAspectRatio="none">
-        {data.map((d, i) => {
-          const slot = i * slotW;
-          const phProd = Math.max(2, (d.produced / max) * height);
-          const phTarget = Math.max(2, (d.target / max) * height);
-          return (
-            <g key={i}>
-              <rect x={slot + 2} y={height - phProd} width={barW} height={phProd} rx={2} fill="#2563eb" fillOpacity={0.85} />
-              <rect x={slot + barW + 4} y={height - phTarget} width={barW} height={phTarget} rx={2} fill="#d1d5db" />
-              <text x={slot + slotW / 2} y={svgH - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">{d.label}</text>
-            </g>
-          );
-        })}
-        {/* legend */}
-        <g transform={`translate(0, ${svgH - 12})`}>
-          <rect x={0} y={-3} width={8} height={8} rx={1} fill="#2563eb" fillOpacity={0.85} />
-          <text x={11} y={5} fontSize={8} fill="#6b7280">Produced</text>
-          <rect x={68} y={-3} width={8} height={8} rx={1} fill="#d1d5db" />
-          <text x={79} y={5} fontSize={8} fill="#6b7280">Target</text>
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-// ─── line chart ──────────────────────────────────────────────────────────────
-
-function LineChart({ data, color = '#059669', height = 130 }: {
-  data: { label: string; value: number }[];
-  color?: string;
-  height?: number;
-}) {
-  if (data.length < 2) return <p className="text-xs text-gray-400 text-center py-8">Not enough data.</p>;
-  const max = Math.max(...data.map(d => d.value), 1);
-  const W = 540;
-  const svgH = height + 30;
-  const stepX = W / (data.length - 1);
-  const pts = data.map((d, i) => ({ x: i * stepX, y: height - (d.value / max) * height }));
-  const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
-  const area = `M ${pts[0].x},${height} ` + pts.map(p => `L ${p.x},${p.y}`).join(' ') + ` L ${pts[pts.length - 1].x},${height} Z`;
-  const gid = `g${color.replace(/[^a-z0-9]/gi, '')}`;
-  return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${svgH}`} className="w-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.18" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill={`url(#${gid})`} />
-        <polyline points={polyline} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {pts.map((p, i) => (
-          <g key={i}>
-            <circle cx={p.x} cy={p.y} r={3.5} fill="white" stroke={color} strokeWidth={1.5} />
-            <text x={p.x} y={svgH - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">{data[i].label}</text>
-          </g>
-        ))}
-      </svg>
-    </div>
-  );
-}
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-function KpiCard({ label, value, sub, icon, accent, loading }: {
-  label: string; value: string | number; sub?: string;
-  icon: React.ReactNode; accent: string; loading: boolean;
-}) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-start gap-3">
-      <div className={`${accent} rounded-xl p-2.5 flex-shrink-0`}>{icon}</div>
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-gray-500 leading-tight">{label}</p>
-        <p className="text-xl font-bold text-gray-800 mt-0.5 tabular-nums">
-          {loading ? <span className="text-gray-200">—</span> : value}
-        </p>
-        {sub && <p className="text-[10px] text-gray-400 mt-0.5">{sub}</p>}
-      </div>
-    </div>
-  );
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
-type DateFilter = 'today' | 'week' | 'month' | 'custom';
-
-function Pill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${active ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-      {label}
-    </button>
-  );
-}
-
-// ─── component ───────────────────────────────────────────────────────────────
-
-export default function ProductionAnalysisPage() {
-  const [records, setRecords] = useState<ProductionData[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+export default function EmployeesPage() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<DateFilter>('month');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
 
-  useEffect(() => {
-    Promise.all([
-      supabase.from('production_data').select('*').order('entry_date', { ascending: true }),
-      supabase.from('products').select('*'),
-    ]).then(([{ data: rec }, { data: prod }]) => {
-      if (rec) setRecords(rec as ProductionData[]);
-      if (prod) setProducts(prod as Product[]);
-      setLoading(false);
-    });
-  }, []);
+  async function fetchEmployees() {
+    setLoading(true);
+    const { data } = await supabase
+      .from('employees')
+      .select('*')
+      .order('name');
+    if (data) setEmployees(data as Employee[]);
+    setLoading(false);
+  }
 
-  // ── filtered slice ─────────────────────────────────────────────────────
+  useEffect(() => { fetchEmployees(); }, []);
 
-  const filtered = useMemo(() => {
-    const t = todayStr();
-    const ws = startOfWeek();
-    const ms = startOfMonth();
-    return records.filter(r => {
-      if (filter === 'today') return r.entry_date === t;
-      if (filter === 'week') return r.entry_date >= ws;
-      if (filter === 'month') return r.entry_date >= ms;
-      if (filter === 'custom') {
-        if (customFrom && r.entry_date < customFrom) return false;
-        if (customTo && r.entry_date > customTo) return false;
-      }
-      return true;
-    });
-  }, [records, filter, customFrom, customTo]);
+  function openAdd() {
+    setForm(emptyForm);
+    setEditId(null);
+    setError('');
+    setShowForm(true);
+  }
 
-  // ── KPIs ──────────────────────────────────────────────────────────────
+  function openEdit(e: Employee) {
+    setForm({ name: e.name, role: e.role ?? '', active: e.active });
+    setEditId(e.id);
+    setError('');
+    setShowForm(true);
+  }
 
-  const kpis = useMemo(() => {
-    const t = todayStr();
-    const ws = startOfWeek();
-    const ms = startOfMonth();
-    const todayRec = records.filter(r => r.entry_date === t);
-    const weekRec = records.filter(r => r.entry_date >= ws);
-    const monthRec = records.filter(r => r.entry_date >= ms);
-
-    const sum = (arr: ProductionData[], k: keyof ProductionData) =>
-      arr.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-
-    // best/worst days
-    const byDate: Record<string, number> = {};
-    records.forEach(r => { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + (r.produced_units || 0); });
-    const entries = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
-
-    const weekDays = new Set(weekRec.map(r => r.entry_date)).size || 1;
-    const monthDays = new Set(monthRec.map(r => r.entry_date)).size || 1;
-
-    const totalSheets = sum(filtered, 'produced_sheets');
-    const totalTarget = sum(filtered, 'target_sheets');
-    const efficiency = totalTarget > 0 ? Math.round((totalSheets / totalTarget) * 100) : 0;
-
-    return {
-      todayUnits: sum(todayRec, 'produced_units'),
-      todaySheets: sum(todayRec, 'produced_sheets'),
-      totalUnits: sum(filtered, 'produced_units'),
-      totalSheets,
-      totalTarget,
-      efficiency,
-      weeklyAvg: (sum(weekRec, 'produced_units') / weekDays).toFixed(0),
-      monthlyAvg: (sum(monthRec, 'produced_units') / monthDays).toFixed(0),
-      bestDay: entries[0] ? `${fmtShort(entries[0][0])} (${entries[0][1].toLocaleString()})` : '—',
-      worstDay: entries.length > 1 ? `${fmtShort(entries[entries.length - 1][0])} (${entries[entries.length - 1][1].toLocaleString()})` : '—',
+  async function handleSave(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (!form.name.trim()) { setError('Employee name is required.'); return; }
+    setSaving(true);
+    setError('');
+    const payload = {
+      name: form.name.trim(),
+      role: form.role.trim() || null,
+      active: form.active,
     };
-  }, [records, filtered]);
+    if (editId) {
+      const { error: err } = await supabase.from('employees').update(payload).eq('id', editId);
+      if (err) { setError(err.message); setSaving(false); return; }
+    } else {
+      const { error: err } = await supabase.from('employees').insert(payload);
+      if (err) { setError(err.message); setSaving(false); return; }
+    }
+    setSaving(false);
+    setShowForm(false);
+    fetchEmployees();
+  }
 
-  // ── chart data ────────────────────────────────────────────────────────
+  async function handleDelete(id: string) {
+    if (!confirm('Delete this employee? This may affect existing production records.')) return;
+    await supabase.from('employees').delete().eq('id', id);
+    fetchEmployees();
+  }
 
-  const dailyUnitsData = useMemo(() => {
-    const byDate: Record<string, number> = {};
-    filtered.forEach(r => { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + (r.produced_units || 0); });
-    return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
-      .map(([d, v]) => ({ label: fmtShort(d), value: v }));
-  }, [filtered]);
+  async function toggleActive(e: Employee) {
+    await supabase.from('employees').update({ active: !e.active }).eq('id', e.id);
+    fetchEmployees();
+  }
 
-  const dailySheetsVsTarget = useMemo(() => {
-    const byDate: Record<string, { produced: number; target: number }> = {};
-    filtered.forEach(r => {
-      if (!byDate[r.entry_date]) byDate[r.entry_date] = { produced: 0, target: 0 };
-      byDate[r.entry_date].produced += r.produced_sheets || 0;
-      byDate[r.entry_date].target += r.target_sheets || 0;
-    });
-    return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
-      .map(([d, v]) => ({ label: fmtShort(d), ...v }));
-  }, [filtered]);
+  const displayed = employees.filter(e => {
+    if (filterActive === 'active') return e.active;
+    if (filterActive === 'inactive') return !e.active;
+    return true;
+  });
 
-  const monthlyData = useMemo(() => {
-    const byMonth: Record<string, number> = {};
-    records.forEach(r => { const ym = r.entry_date.slice(0, 7); byMonth[ym] = (byMonth[ym] || 0) + (r.produced_units || 0); });
-    return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).slice(-12)
-      .map(([ym, v]) => ({ label: fmtMonth(ym), value: v }));
-  }, [records]);
-
-  const weeklyData = useMemo(() => {
-    const byWeek: Record<string, number> = {};
-    records.forEach(r => {
-      const d = new Date(r.entry_date);
-      const ws = startOfWeek(d);
-      byWeek[ws] = (byWeek[ws] || 0) + (r.produced_units || 0);
-    });
-    return Object.entries(byWeek).sort(([a], [b]) => a.localeCompare(b)).slice(-10)
-      .map(([d, v]) => ({ label: fmtShort(d), value: v }));
-  }, [records]);
-
-  // product breakdown
-  const productBreakdown = useMemo(() => {
-    const byProd: Record<string, number> = {};
-    filtered.forEach(r => {
-      const k = r.product_id ?? '__none__';
-      byProd[k] = (byProd[k] || 0) + (r.produced_units || 0);
-    });
-    return Object.entries(byProd)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([pid, v]) => ({
-        label: products.find(p => p.id === pid)?.name?.slice(0, 10) ?? 'Unknown',
-        value: v,
-      }));
-  }, [filtered, products]);
-
-  // ─────────────────────────────────────────────────────────────────────
+  const activeCount = employees.filter(e => e.active).length;
+  const inactiveCount = employees.filter(e => !e.active).length;
 
   return (
     <div>
-      <PageHeader title="Production Analysis" subtitle="Performance insights and production trends." />
+      <PageHeader
+        title="Employees"
+        subtitle="Manage production and packaging staff."
+        actions={
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm shadow-blue-200 transition-all"
+          >
+            <Plus size={16} strokeWidth={2.5} /> Add Employee
+          </button>
+        }
+      />
 
-      {/* Filter bar */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-sm px-4 py-3 mb-5 flex flex-wrap items-center gap-3">
-        <Calendar size={14} className="text-gray-400" />
-        <Pill label="Today" active={filter === 'today'} onClick={() => setFilter('today')} />
-        <Pill label="This Week" active={filter === 'week'} onClick={() => setFilter('week')} />
-        <Pill label="This Month" active={filter === 'month'} onClick={() => setFilter('month')} />
-        <Pill label="Custom" active={filter === 'custom'} onClick={() => setFilter('custom')} />
-        {filter === 'custom' && (
-          <div className="flex items-center gap-2">
-            <input type="date" className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition bg-white"
-              value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
-            <span className="text-xs text-gray-400">to</span>
-            <input type="date" className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition bg-white"
-              value={customTo} onChange={e => setCustomTo(e.target.value)} />
+      {/* Summary badges */}
+      <div className="flex items-center gap-3 mb-5">
+        <div className="bg-white border border-gray-100 rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm">
+          <div className="bg-blue-50 rounded-lg p-2"><Users size={18} className="text-blue-600" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Total Staff</p>
+            <p className="text-xl font-bold text-gray-800">{employees.length}</p>
           </div>
-        )}
-        <span className="ml-auto text-xs text-gray-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="bg-white border border-gray-100 rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm">
+          <div className="bg-emerald-50 rounded-lg p-2"><Check size={18} className="text-emerald-600" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Active</p>
+            <p className="text-xl font-bold text-gray-800">{activeCount}</p>
+          </div>
+        </div>
+        <div className="bg-white border border-gray-100 rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm">
+          <div className="bg-gray-100 rounded-lg p-2"><X size={18} className="text-gray-500" /></div>
+          <div>
+            <p className="text-xs text-gray-500">Inactive</p>
+            <p className="text-xl font-bold text-gray-800">{inactiveCount}</p>
+          </div>
+        </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Today's Units" value={kpis.todayUnits.toLocaleString()} loading={loading}
-          icon={<Package2 size={18} />} accent="bg-blue-50 text-blue-600" sub="units produced today" />
-        <KpiCard label="Today's Sheets" value={kpis.todaySheets.toLocaleString()} loading={loading}
-          icon={<Layers size={18} />} accent="bg-emerald-50 text-emerald-600" sub="sheets produced today" />
-        <KpiCard label="Total Units (Period)" value={kpis.totalUnits.toLocaleString()} loading={loading}
-          icon={<Package2 size={18} />} accent="bg-sky-50 text-sky-600" />
-        <KpiCard label="Sheet Efficiency" value={`${kpis.efficiency}%`} loading={loading}
-          icon={<Target size={18} />} accent="bg-violet-50 text-violet-600" sub="produced vs target" />
-        <KpiCard label="Weekly Avg (Units/Day)" value={kpis.weeklyAvg} loading={loading}
-          icon={<TrendingUp size={18} />} accent="bg-amber-50 text-amber-600" />
-        <KpiCard label="Monthly Avg (Units/Day)" value={kpis.monthlyAvg} loading={loading}
-          icon={<CheckCircle2 size={18} />} accent="bg-orange-50 text-orange-600" />
-        <KpiCard label="Best Production Day" value={kpis.bestDay} loading={loading}
-          icon={<TrendingUp size={18} />} accent="bg-green-50 text-green-600" />
-        <KpiCard label="Lowest Production Day" value={kpis.worstDay} loading={loading}
-          icon={<TrendingDown size={18} />} accent="bg-red-50 text-red-500" />
-      </div>
-
-      {/* Charts row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <ChartCard title="Daily Units Produced">
-          <BarChart data={dailyUnitsData} color="#2563eb" />
-        </ChartCard>
-        <ChartCard title="Sheets Produced vs. Target (Daily)">
-          <MultiBarChart data={dailySheetsVsTarget} />
-        </ChartCard>
-      </div>
-
-      {/* Charts row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Weekly Production Trend">
-          <LineChart data={weeklyData} color="#0891b2" />
-        </ChartCard>
-        <ChartCard title="Monthly Production (Units)">
-          <BarChart data={monthlyData} color="#059669" height={150} />
-        </ChartCard>
-      </div>
-
-      {/* Product breakdown */}
-      {productBreakdown.length > 0 && (
-        <div className="mt-4">
-          <ChartCard title="Units by Product (Period)">
-            <BarChart data={productBreakdown} color="#7c3aed" height={120} />
-          </ChartCard>
+      {/* Add / Edit form */}
+      {showForm && (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h2 className="text-sm font-bold text-gray-800">{editId ? 'Edit Employee' : 'Add New Employee'}</h2>
+              <p className="text-xs text-gray-400 mt-0.5">This person will appear in the Production and Packaging Incharge dropdowns.</p>
+            </div>
+            <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-2 rounded-lg transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+          <form onSubmit={handleSave}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
+                  Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className={inp}
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Ahmed Khan"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Role</label>
+                <select
+                  className={inp}
+                  value={form.role}
+                  onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                >
+                  <option value="">— Select Role —</option>
+                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Status</label>
+                <select
+                  className={inp}
+                  value={form.active ? 'active' : 'inactive'}
+                  onChange={e => setForm(f => ({ ...f, active: e.target.value === 'active' }))}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+            {error && (
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-red-500">
+                <AlertCircle size={12} /> {error}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" onClick={() => setShowForm(false)}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={saving}
+                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all disabled:opacity-60">
+                <Check size={14} /> {saving ? 'Saving...' : editId ? 'Update' : 'Save Employee'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
+
+      {/* Filter tabs */}
+      <div className="flex items-center gap-1 mb-4">
+        {(['all', 'active', 'inactive'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilterActive(f)}
+            className={`px-4 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
+              filterActive === f
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {f === 'all' ? `All (${employees.length})` : f === 'active' ? `Active (${activeCount})` : `Inactive (${inactiveCount})`}
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50/80 border-b border-gray-100">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Role</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="text-center py-14">
+                    <div className="flex flex-col items-center gap-2 text-gray-400">
+                      <div className="w-5 h-5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+                      <span className="text-xs">Loading employees...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : displayed.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="text-center py-14">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                        <Users size={20} className="text-gray-400" />
+                      </div>
+                      <p className="text-sm text-gray-500 font-medium">
+                        {employees.length === 0 ? 'No employees yet.' : 'No employees match this filter.'}
+                      </p>
+                      {employees.length === 0 && (
+                        <p className="text-xs text-gray-400">Add employees to use them as Production or Packaging Incharge.</p>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ) : displayed.map(e => (
+                <tr key={e.id} className="hover:bg-blue-50/20 transition-colors group">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                        {e.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                      </div>
+                      <span className="font-medium text-gray-800">{e.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {e.role ? (
+                      <span className="bg-blue-50 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-md">
+                        {e.role}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => toggleActive(e)}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-colors ${
+                        e.active
+                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                      title="Click to toggle status"
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${e.active ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                      {e.active ? 'Active' : 'Inactive'}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => openEdit(e)}
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Edit"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(e.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {displayed.length > 0 && (
+          <div className="px-4 py-2.5 border-t border-gray-50 bg-gray-50/40">
+            <p className="text-xs text-gray-400">{displayed.length} employee{displayed.length !== 1 ? 's' : ''} shown</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
