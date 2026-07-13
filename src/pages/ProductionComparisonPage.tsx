@@ -1,14 +1,14 @@
-import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   Calendar, TrendingUp, TrendingDown, Package2, Layers, Users, Target,
   CheckCircle2, ArrowUpRight, ArrowDownRight, Download, FileText, FileSpreadsheet,
-  Printer, Filter, BarChart3, PieChart, LineChart, Award, Briefcase, Clock,
+  Printer, Filter, BarChart3, Award, Briefcase, Clock,
   ChevronDown, ChevronUp, RefreshCw, X, Info
 } from 'lucide-react';
 import {
   LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart as RechartsBarChart, Bar, PieChart as RechartsPieChart, Pie, Cell, Legend,
-  AreaChart, Area, ComposedChart
+  AreaChart, Area
 } from 'recharts';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -450,11 +450,11 @@ export default function ProductionComparisonPage() {
       diffTrend: todaySheets > yesterdaySheets ? 'up' : todaySheets < yesterdaySheets ? 'down' : 'neutral',
       totalSheets: sum(filtered, 'produced_sheets').toLocaleString(),
       avgSheets: avgSheets.toFixed(0),
-      totalEmp: sum(filtered, 'production_employees').toLocaleString(),
+      totalEmp: employees.length.toLocaleString(),
       avgEmp: avgEmp.toFixed(1),
       batchCount,
     };
-  }, [records, filtered]);
+  }, [records, filtered, employees]);
 
   // ── Chart Data ───────────────────────────────────────────────────────────────
 
@@ -661,7 +661,7 @@ export default function ProductionComparisonPage() {
 
     // Employee productivity
     const empTrend = comparisonData.avgEmpA > comparisonData.avgEmpB ? 'increased' : 'decreased';
-    const empDiff = comparisonData.avgEmpB > 0
+    const empDiff = Number(comparisonData.avgEmpB) > 0
       ? Math.abs((Number(comparisonData.avgEmpA) - Number(comparisonData.avgEmpB)) / Number(comparisonData.avgEmpB) * 100).toFixed(1)
       : '0';
     result.push(`Employee productivity ${empTrend} by ${empDiff}%.`);

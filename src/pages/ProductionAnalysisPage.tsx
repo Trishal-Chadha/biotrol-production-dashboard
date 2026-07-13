@@ -1,6 +1,11 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { Calendar, TrendingUp, TrendingDown, Package2, Layers, Users, Target, CheckCircle2 } from 'lucide-react';
-import { supabase, ProductionData, Product } from '../lib/supabase';
+import { useEffect, useState, useMemo } from 'react';
+import { Calendar, TrendingUp, TrendingDown, Package2, Layers, Target, CheckCircle2 } from 'lucide-react';
+import {
+  AreaChart, Area, BarChart as ReBar, Bar, LineChart as ReLine, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  PieChart as RePie, Pie, Cell,
+} from 'recharts';
+import { supabase, ProductionData, Product, Employee } from '../lib/supabase';
 import PageHeader from '../components/PageHeader';
 
 // ─── date helpers ─────────────────────────────────────────────────────────────
@@ -28,116 +33,23 @@ function fmtMonth(ym: string) {
   return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
 }
 
-// ─── SVG bar chart ─────────────────────────────────────────────────────────────
+const PIE_COLORS = ['#2563eb', '#059669', '#f59e0b', '#dc2626', '#7c3aed', '#06b6d4', '#ec4899', '#84cc16', '#6366f1', '#14b8a6'];
 
-function BarChart({ data, color = '#2563eb', height = 130 }: {
-  data: { label: string; value: number }[];
-  color?: string;
-  height?: number;
+// ── Custom tooltip ──────────────────────────────────────────────────────────
+function ChartTooltip({ active, payload, label }: {
+  active?: boolean; payload?: { name?: string; value?: number; color?: string }[]; label?: string;
 }) {
-  if (!data.length) return <p className="text-xs text-gray-400 text-center py-8">No data for this period.</p>;
-  const max = Math.max(...data.map(d => d.value), 1);
-  const barW = Math.max(10, Math.min(44, Math.floor(540 / data.length) - 6));
-  const gap = Math.max(4, Math.floor(540 / data.length) - barW);
-  const totalW = data.length * (barW + gap) - gap;
-  const svgH = height + 30;
+  if (!active || !payload || payload.length === 0) return null;
   return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${Math.max(totalW, 280)} ${svgH}`} className="w-full" preserveAspectRatio="none">
-        {data.map((d, i) => {
-          const bh = Math.max(2, (d.value / max) * height);
-          const x = i * (barW + gap);
-          const y = height - bh;
-          return (
-            <g key={i}>
-              <rect x={x} y={y} width={barW} height={bh} rx={3} fill={color} fillOpacity={0.8} />
-              {d.value > 0 && (
-                <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={8} fill="#6b7280" fontWeight="600">
-                  {d.value.toLocaleString()}
-                </text>
-              )}
-              <text x={x + barW / 2} y={svgH - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">{d.label}</text>
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-// ─── SVG multi-bar chart ──────────────────────────────────────────────────────
-
-function MultiBarChart({ data, height = 130 }: {
-  data: { label: string; produced: number; target: number }[];
-  height?: number;
-}) {
-  if (!data.length) return <p className="text-xs text-gray-400 text-center py-8">No data for this period.</p>;
-  const max = Math.max(...data.flatMap(d => [d.produced, d.target]), 1);
-  const slotW = Math.max(24, Math.min(80, Math.floor(540 / data.length)));
-  const barW = Math.floor(slotW * 0.38);
-  const totalW = data.length * slotW;
-  const svgH = height + 30;
-  return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${Math.max(totalW, 280)} ${svgH}`} className="w-full" preserveAspectRatio="none">
-        {data.map((d, i) => {
-          const slot = i * slotW;
-          const phProd = Math.max(2, (d.produced / max) * height);
-          const phTarget = Math.max(2, (d.target / max) * height);
-          return (
-            <g key={i}>
-              <rect x={slot + 2} y={height - phProd} width={barW} height={phProd} rx={2} fill="#2563eb" fillOpacity={0.85} />
-              <rect x={slot + barW + 4} y={height - phTarget} width={barW} height={phTarget} rx={2} fill="#d1d5db" />
-              <text x={slot + slotW / 2} y={svgH - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">{d.label}</text>
-            </g>
-          );
-        })}
-        {/* legend */}
-        <g transform={`translate(0, ${svgH - 12})`}>
-          <rect x={0} y={-3} width={8} height={8} rx={1} fill="#2563eb" fillOpacity={0.85} />
-          <text x={11} y={5} fontSize={8} fill="#6b7280">Produced</text>
-          <rect x={68} y={-3} width={8} height={8} rx={1} fill="#d1d5db" />
-          <text x={79} y={5} fontSize={8} fill="#6b7280">Target</text>
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-// ─── line chart ──────────────────────────────────────────────────────────────
-
-function LineChart({ data, color = '#059669', height = 130 }: {
-  data: { label: string; value: number }[];
-  color?: string;
-  height?: number;
-}) {
-  if (data.length < 2) return <p className="text-xs text-gray-400 text-center py-8">Not enough data.</p>;
-  const max = Math.max(...data.map(d => d.value), 1);
-  const W = 540;
-  const svgH = height + 30;
-  const stepX = W / (data.length - 1);
-  const pts = data.map((d, i) => ({ x: i * stepX, y: height - (d.value / max) * height }));
-  const polyline = pts.map(p => `${p.x},${p.y}`).join(' ');
-  const area = `M ${pts[0].x},${height} ` + pts.map(p => `L ${p.x},${p.y}`).join(' ') + ` L ${pts[pts.length - 1].x},${height} Z`;
-  const gid = `g${color.replace(/[^a-z0-9]/gi, '')}`;
-  return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${svgH}`} className="w-full" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.18" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill={`url(#${gid})`} />
-        <polyline points={polyline} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        {pts.map((p, i) => (
-          <g key={i}>
-            <circle cx={p.x} cy={p.y} r={3.5} fill="white" stroke={color} strokeWidth={1.5} />
-            <text x={p.x} y={svgH - 2} textAnchor="middle" fontSize={9} fill="#9ca3af">{data[i].label}</text>
-          </g>
-        ))}
-      </svg>
+    <div className="bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 px-3 py-2">
+      {label && <p className="text-xs font-semibold text-gray-700 mb-1">{label}</p>}
+      {payload.map((p, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs">
+          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: p.color }} />
+          <span className="text-gray-500">{p.name}:</span>
+          <span className="font-semibold text-gray-800 tabular-nums">{Number(p.value ?? 0).toLocaleString()}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -181,11 +93,16 @@ function Pill({ label, active, onClick }: { label: string; active: boolean; onCl
   );
 }
 
+function EmptyChart() {
+  return <p className="text-xs text-gray-400 text-center py-16">No data for this period.</p>;
+}
+
 // ─── component ───────────────────────────────────────────────────────────────
 
 export default function ProductionAnalysisPage() {
   const [records, setRecords] = useState<ProductionData[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<DateFilter>('month');
   const [customFrom, setCustomFrom] = useState('');
@@ -195,9 +112,11 @@ export default function ProductionAnalysisPage() {
     Promise.all([
       supabase.from('production_data').select('*').order('entry_date', { ascending: true }),
       supabase.from('products').select('*'),
-    ]).then(([{ data: rec }, { data: prod }]) => {
-      if (rec) setRecords(rec as ProductionData[]);
-      if (prod) setProducts(prod as Product[]);
+      supabase.from('employees').select('*'),
+    ]).then(([rec, prod, emp]) => {
+      if (rec.data) setRecords(rec.data as ProductionData[]);
+      if (prod.data) setProducts(prod.data as Product[]);
+      if (emp.data) setEmployees(emp.data as Employee[]);
       setLoading(false);
     });
   }, []);
@@ -233,9 +152,8 @@ export default function ProductionAnalysisPage() {
     const sum = (arr: ProductionData[], k: keyof ProductionData) =>
       arr.reduce((s, r) => s + (Number(r[k]) || 0), 0);
 
-    // best/worst days
     const byDate: Record<string, number> = {};
-    records.forEach(r => { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + (r.produced_units || 0); });
+    records.forEach(r => { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + (r.produced_sheets || 0); });
     const entries = Object.entries(byDate).sort((a, b) => b[1] - a[1]);
 
     const weekDays = new Set(weekRec.map(r => r.entry_date)).size || 1;
@@ -252,8 +170,8 @@ export default function ProductionAnalysisPage() {
       totalSheets,
       totalTarget,
       efficiency,
-      weeklyAvg: (sum(weekRec, 'produced_units') / weekDays).toFixed(0),
-      monthlyAvg: (sum(monthRec, 'produced_units') / monthDays).toFixed(0),
+      weeklyAvg: (sum(weekRec, 'produced_sheets') / weekDays).toFixed(0),
+      monthlyAvg: (sum(monthRec, 'produced_sheets') / monthDays).toFixed(0),
       bestDay: entries[0] ? `${fmtShort(entries[0][0])} (${entries[0][1].toLocaleString()})` : '—',
       worstDay: entries.length > 1 ? `${fmtShort(entries[entries.length - 1][0])} (${entries[entries.length - 1][1].toLocaleString()})` : '—',
     };
@@ -261,14 +179,7 @@ export default function ProductionAnalysisPage() {
 
   // ── chart data ────────────────────────────────────────────────────────
 
-  const dailyUnitsData = useMemo(() => {
-    const byDate: Record<string, number> = {};
-    filtered.forEach(r => { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + (r.produced_units || 0); });
-    return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
-      .map(([d, v]) => ({ label: fmtShort(d), value: v }));
-  }, [filtered]);
-
-  const dailySheetsVsTarget = useMemo(() => {
+  const dailyData = useMemo(() => {
     const byDate: Record<string, { produced: number; target: number }> = {};
     filtered.forEach(r => {
       if (!byDate[r.entry_date]) byDate[r.entry_date] = { produced: 0, target: 0 };
@@ -276,42 +187,69 @@ export default function ProductionAnalysisPage() {
       byDate[r.entry_date].target += r.target_sheets || 0;
     });
     return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
-      .map(([d, v]) => ({ label: fmtShort(d), ...v }));
+      .map(([d, v]) => ({ date: fmtShort(d), produced: v.produced, target: v.target }));
   }, [filtered]);
-
-  const monthlyData = useMemo(() => {
-    const byMonth: Record<string, number> = {};
-    records.forEach(r => { const ym = r.entry_date.slice(0, 7); byMonth[ym] = (byMonth[ym] || 0) + (r.produced_units || 0); });
-    return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).slice(-12)
-      .map(([ym, v]) => ({ label: fmtMonth(ym), value: v }));
-  }, [records]);
 
   const weeklyData = useMemo(() => {
     const byWeek: Record<string, number> = {};
     records.forEach(r => {
       const d = new Date(r.entry_date);
       const ws = startOfWeek(d);
-      byWeek[ws] = (byWeek[ws] || 0) + (r.produced_units || 0);
+      byWeek[ws] = (byWeek[ws] || 0) + (r.produced_sheets || 0);
     });
     return Object.entries(byWeek).sort(([a], [b]) => a.localeCompare(b)).slice(-10)
-      .map(([d, v]) => ({ label: fmtShort(d), value: v }));
+      .map(([d, v]) => ({ week: fmtShort(d), sheets: v }));
   }, [records]);
 
-  // product breakdown
-  const productBreakdown = useMemo(() => {
+  const monthlyData = useMemo(() => {
+    const byMonth: Record<string, number> = {};
+    records.forEach(r => {
+      const ym = r.entry_date.slice(0, 7);
+      byMonth[ym] = (byMonth[ym] || 0) + (r.produced_sheets || 0);
+    });
+    return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).slice(-12)
+      .map(([ym, v]) => ({ month: fmtMonth(ym), sheets: v }));
+  }, [records]);
+
+  const productWiseData = useMemo(() => {
     const byProd: Record<string, number> = {};
     filtered.forEach(r => {
-      const k = r.product_id ?? '__none__';
-      byProd[k] = (byProd[k] || 0) + (r.produced_units || 0);
+      const name = products.find(p => p.id === r.product_id)?.name ?? 'Unknown';
+      byProd[name] = (byProd[name] || 0) + (r.produced_sheets || 0);
     });
     return Object.entries(byProd)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
-      .map(([pid, v]) => ({
-        label: products.find(p => p.id === pid)?.name?.slice(0, 10) ?? 'Unknown',
-        value: v,
-      }));
+      .map(([name, v]) => ({ name: name.slice(0, 15), sheets: v }));
   }, [filtered, products]);
+
+  const employeeEffData = useMemo(() => {
+    const byEmp: Record<string, { sheets: number; entries: number }> = {};
+    filtered.forEach(r => {
+      if (r.production_incharge_id) {
+        const name = employees.find(e => e.id === r.production_incharge_id)?.name ?? 'Unknown';
+        if (!byEmp[name]) byEmp[name] = { sheets: 0, entries: 0 };
+        byEmp[name].sheets += r.produced_sheets || 0;
+        byEmp[name].entries += 1;
+      }
+    });
+    return Object.entries(byEmp)
+      .map(([name, d]) => ({ name: name.slice(0, 15), sheets: d.sheets, entries: d.entries }))
+      .sort((a, b) => b.sheets - a.sheets)
+      .slice(0, 10);
+  }, [filtered, employees]);
+
+  const prodVsPkgData = useMemo(() => {
+    const byDate: Record<string, { sheets: number; pouches: number }> = {};
+    filtered.forEach(r => {
+      if (!byDate[r.entry_date]) byDate[r.entry_date] = { sheets: 0, pouches: 0 };
+      byDate[r.entry_date].sheets += r.produced_sheets || 0;
+      byDate[r.entry_date].pouches +=
+        (r.pkg_pouches || 0) + (r.pkg_pouches_2 || 0) + (r.pkg_pouches_3 || 0);
+    });
+    return Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
+      .map(([d, v]) => ({ date: fmtShort(d), sheets: v.sheets, pouches: v.pouches }));
+  }, [filtered]);
 
   // ─────────────────────────────────────────────────────────────────────
 
@@ -344,13 +282,13 @@ export default function ProductionAnalysisPage() {
           icon={<Package2 size={18} />} accent="bg-blue-50 text-blue-600" sub="units produced today" />
         <KpiCard label="Today's Sheets" value={kpis.todaySheets.toLocaleString()} loading={loading}
           icon={<Layers size={18} />} accent="bg-emerald-50 text-emerald-600" sub="sheets produced today" />
-        <KpiCard label="Total Units (Period)" value={kpis.totalUnits.toLocaleString()} loading={loading}
+        <KpiCard label="Total Sheets (Period)" value={kpis.totalSheets.toLocaleString()} loading={loading}
           icon={<Package2 size={18} />} accent="bg-sky-50 text-sky-600" />
         <KpiCard label="Sheet Efficiency" value={`${kpis.efficiency}%`} loading={loading}
           icon={<Target size={18} />} accent="bg-violet-50 text-violet-600" sub="produced vs target" />
-        <KpiCard label="Weekly Avg (Units/Day)" value={kpis.weeklyAvg} loading={loading}
+        <KpiCard label="Weekly Avg (Sheets/Day)" value={kpis.weeklyAvg} loading={loading}
           icon={<TrendingUp size={18} />} accent="bg-amber-50 text-amber-600" />
-        <KpiCard label="Monthly Avg (Units/Day)" value={kpis.monthlyAvg} loading={loading}
+        <KpiCard label="Monthly Avg (Sheets/Day)" value={kpis.monthlyAvg} loading={loading}
           icon={<CheckCircle2 size={18} />} accent="bg-orange-50 text-orange-600" />
         <KpiCard label="Best Production Day" value={kpis.bestDay} loading={loading}
           icon={<TrendingUp size={18} />} accent="bg-green-50 text-green-600" />
@@ -358,34 +296,156 @@ export default function ProductionAnalysisPage() {
           icon={<TrendingDown size={18} />} accent="bg-red-50 text-red-500" />
       </div>
 
-      {/* Charts row 1 */}
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <ChartCard title="Daily Units Produced">
-          <BarChart data={dailyUnitsData} color="#2563eb" />
+        <ChartCard title="Daily Production Trend">
+          <div className="h-64">
+            {dailyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dailyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gDaily" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area type="monotone" dataKey="produced" stroke="#2563eb" fill="url(#gDaily)" name="Sheets Produced" strokeWidth={2.5} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} animationDuration={800} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
         </ChartCard>
-        <ChartCard title="Sheets Produced vs. Target (Daily)">
-          <MultiBarChart data={dailySheetsVsTarget} />
-        </ChartCard>
-      </div>
 
-      {/* Charts row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Weekly Production Trend">
-          <LineChart data={weeklyData} color="#0891b2" />
+          <div className="h-64">
+            {weeklyData.length >= 2 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ReLine data={weeklyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <XAxis dataKey="week" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Line type="monotone" dataKey="sheets" stroke="#0891b2" strokeWidth={2.5} dot={{ r: 3, fill: '#0891b2', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }} name="Sheets" animationDuration={800} />
+                </ReLine>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
         </ChartCard>
-        <ChartCard title="Monthly Production (Units)">
-          <BarChart data={monthlyData} color="#059669" height={150} />
+
+        <ChartCard title="Monthly Production Trend">
+          <div className="h-64">
+            {monthlyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ReBar data={monthlyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gMonthly" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#059669" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#059669" stopOpacity={0.6} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(5, 150, 105, 0.06)' }} />
+                  <Bar dataKey="sheets" fill="url(#gMonthly)" radius={[6, 6, 0, 0]} name="Sheets" animationDuration={800} />
+                </ReBar>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Product-wise Production">
+          <div className="h-64">
+            {productWiseData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <RePie>
+                  <Pie
+                    data={productWiseData}
+                    cx="50%" cy="50%"
+                    outerRadius={80}
+                    innerRadius={40}
+                    paddingAngle={2}
+                    dataKey="sheets"
+                    nameKey="name"
+                    label={({ name, percent }: { name: string; percent?: number }) =>
+                      `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`}
+                    labelLine={false}
+                    animationDuration={800}
+                  >
+                    {productWiseData.map((_, i) => (
+                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} stroke="#fff" strokeWidth={1.5} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                </RePie>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Employee Efficiency">
+          <div className="h-64">
+            {employeeEffData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ReBar data={employeeEffData} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gEmpEff" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#059669" stopOpacity={0.8} />
+                      <stop offset="100%" stopColor="#059669" stopOpacity={1} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#6b7280' }} width={90} axisLine={false} tickLine={false} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(5, 150, 105, 0.06)' }} />
+                  <Bar dataKey="sheets" fill="url(#gEmpEff)" radius={[0, 6, 6, 0]} name="Sheets" animationDuration={800} />
+                </ReBar>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Target vs Actual Production">
+          <div className="h-64">
+            {dailyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ReBar data={dailyData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }} barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(37, 99, 235, 0.05)' }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="produced" fill="#2563eb" radius={[4, 4, 0, 0]} name="Actual" animationDuration={800} />
+                  <Bar dataKey="target" fill="#e5e7eb" radius={[4, 4, 0, 0]} name="Target" animationDuration={800} />
+                </ReBar>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Production vs Packaging Comparison">
+          <div className="h-64">
+            {prodVsPkgData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ReBar data={prodVsPkgData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }} barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={{ stroke: '#e5e7eb' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: '#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(37, 99, 235, 0.05)' }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="sheets" fill="#2563eb" radius={[4, 4, 0, 0]} name="Production (Sheets)" animationDuration={800} />
+                  <Bar dataKey="pouches" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Packaging (Tests)" animationDuration={800} />
+                </ReBar>
+              </ResponsiveContainer>
+            ) : <EmptyChart />}
+          </div>
         </ChartCard>
       </div>
-
-      {/* Product breakdown */}
-      {productBreakdown.length > 0 && (
-        <div className="mt-4">
-          <ChartCard title="Units by Product (Period)">
-            <BarChart data={productBreakdown} color="#7c3aed" height={120} />
-          </ChartCard>
-        </div>
-      )}
     </div>
   );
 }

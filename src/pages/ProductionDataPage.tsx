@@ -2,10 +2,11 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Plus, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight,
   Search, Calendar, Package2, Layers, Users, CheckCircle2,
-  AlertCircle, RotateCcw,
+  AlertCircle, RotateCcw, ChevronDown,
 } from 'lucide-react';
 import { supabase, Product, Employee, ProductionData } from '../lib/supabase';
 import PageHeader from '../components/PageHeader';
+import SearchableSelect from '../components/SearchableSelect';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ interface ProductRow {
   batch_number: string;
   produced_sheets: string;
   target_sheets: string;
+  tests_produced: string;
   production_incharge_id: string;
   production_remarks: string;
 }
@@ -45,6 +47,7 @@ const emptyProductRow = (): ProductRow => ({
   batch_number: '',
   produced_sheets: '',
   target_sheets: '',
+  tests_produced: '',
   production_incharge_id: '',
   production_remarks: '',
 });
@@ -209,6 +212,7 @@ function ViewModal({ record, products, employees, onClose }: {
             <Row label="Batch Number" value={record.batch_number} />
             <Row label="No. Sheets Produced" value={record.produced_sheets.toLocaleString()} />
             <Row label="Target Sheets" value={record.target_sheets.toLocaleString()} />
+            {record.prod_tests_1 != null && <Row label="No. of Tests Produced" value={record.prod_tests_1.toLocaleString()} />}
             <Row label="Production Employees" value={record.production_employees} />
             <Row label="Production Incharge" value={prodIncharge?.name} />
             {record.production_remarks && <Row label="Remarks" value={record.production_remarks} />}
@@ -257,6 +261,11 @@ export default function ProductionDataPage() {
   const [form, setForm] = useState<FormState>(emptyForm());
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
+
+  // accordion open-state for product rows: Product 1 expanded, 2 & 3 collapsed
+  const [openProd, setOpenProd] = useState<boolean[]>([true, false, false]);
+  const toggleProd = (idx: number) =>
+    setOpenProd(prev => prev.map((o, i) => (i === idx ? !o : o)));
 
   // view modal
   const [viewRecord, setViewRecord] = useState<ProductionData | null>(null);
@@ -309,6 +318,26 @@ export default function ProductionDataPage() {
     };
   }, [records]);
 
+  // unique batch numbers from existing records — for the Batch searchable dropdown
+  const batchOptions = useMemo(() => {
+    const set = new Set(records.map(r => r.batch_number).filter(Boolean));
+    return Array.from(set).sort();
+  }, [records]);
+
+  // product + employee option lists for SearchableSelect
+  const productOptions = useMemo(
+    () => products.map(p => ({ value: p.id, label: p.name })),
+    [products],
+  );
+  const employeeOptions = useMemo(
+    () => employees.map(e => ({ value: e.id, label: e.name })),
+    [employees],
+  );
+  const batchSelOptions = useMemo(
+    () => batchOptions.map(b => ({ value: b, label: b })),
+    [batchOptions],
+  );
+
   // ── filtered + paginated ─────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
@@ -338,6 +367,7 @@ export default function ProductionDataPage() {
     setForm(emptyForm());
     setFieldErrors({});
     setEditId(null);
+    setOpenProd([true, false, false]);
     setDrawerOpen(true);
   }
 
@@ -352,6 +382,7 @@ export default function ProductionDataPage() {
           target_sheets: String(r.target_sheets),
           production_incharge_id: r.production_incharge_id ?? '',
           production_remarks: r.production_remarks ?? '',
+        tests_produced: r.prod_tests_1 != null ? String(r.prod_tests_1) : '',
         },
         emptyProductRow(),
         emptyProductRow(),
@@ -369,6 +400,9 @@ export default function ProductionDataPage() {
     });
     setFieldErrors({});
     setEditId(r.id);
+    // open the first product section that has a product selected
+    const filled = (r.product_id ? 0 : -1);
+    setOpenProd([filled === 0, false, false]);
     setDrawerOpen(true);
   }
 
@@ -443,6 +477,9 @@ export default function ProductionDataPage() {
         target_sheets: numOrZero(row.target_sheets),
         production_incharge_id: row.production_incharge_id || null,
         production_remarks: row.production_remarks.trim() || null,
+        prod_tests_1: numOrZero(form.productRows[0].tests_produced) || null,
+        prod_tests_2: numOrZero(form.productRows[1].tests_produced) || null,
+        prod_tests_3: numOrZero(form.productRows[2].tests_produced) || null,
       };
       const { error: err } = await supabase.from('production_data').update(payload).eq('id', editId);
       setSaving(false);
@@ -462,6 +499,9 @@ export default function ProductionDataPage() {
         target_sheets: numOrZero(row.target_sheets),
         production_incharge_id: row.production_incharge_id || null,
         production_remarks: row.production_remarks.trim() || null,
+        prod_tests_1: numOrZero(form.productRows[0].tests_produced) || null,
+        prod_tests_2: numOrZero(form.productRows[1].tests_produced) || null,
+        prod_tests_3: numOrZero(form.productRows[2].tests_produced) || null,
       }));
 
       const { error: err } = await supabase.from('production_data').insert(payloads);
@@ -776,48 +816,92 @@ export default function ProductionDataPage() {
               </Field>
             </div>
 
-            {/* Product rows */}
-            {form.productRows.map((row, idx) => (
-              <div key={idx} className={idx > 0 ? 'mt-5 pt-5 border-t border-gray-100' : ''}>
-                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">Product {idx + 1}</p>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <Field label="Product">
-                    <select className={inp} value={row.product_id} onChange={e => setRow(idx, { product_id: e.target.value })}>
-                      <option value="">— Select Product —</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </Field>
-                  <Field label="Batch Number">
-                    <input className={inp} placeholder="e.g. BT-2024-001" value={row.batch_number} onChange={e => setRow(idx, { batch_number: e.target.value })} />
-                  </Field>
+            {/* Product rows — collapsible accordions */}
+            {form.productRows.map((row, idx) => {
+              const openRow = openProd[idx];
+              return (
+                <div key={idx} className={idx > 0 ? 'mt-3 border-t border-gray-100' : ''}>
+                  <button
+                    type="button"
+                    onClick={() => toggleProd(idx)}
+                    className="w-full flex items-center justify-between py-3 group"
+                  >
+                    <span className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-2">
+                      <ChevronDown size={14} className={`transition-transform ${openRow ? '' : '-rotate-90'}`} />
+                      Product {idx + 1}
+                    </span>
+                    <span className={`text-[10px] font-medium ${row.product_id ? 'text-gray-500' : 'text-gray-300'}`}>
+                      {row.product_id ? products.find(p => p.id === row.product_id)?.name ?? 'Selected' : 'Empty'}
+                    </span>
+                  </button>
+                  {openRow && (
+                    <div className="pb-2">
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <Field label="Product">
+                          <SearchableSelect
+                            options={productOptions}
+                            value={row.product_id}
+                            onChange={v => setRow(idx, { product_id: v })}
+                            placeholder="— Select Product —"
+                            className={inp}
+                          />
+                        </Field>
+                        <Field label="Batch Number">
+                          <SearchableSelect
+                            options={batchSelOptions}
+                            value={row.batch_number}
+                            onChange={v => setRow(idx, { batch_number: v })}
+                            placeholder="Type or select batch"
+                            emptyText="No batches yet — type to enter new"
+                            className={inp}
+                          />
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <Field label="No. Sheets Produced">
+                          <input type="number" min="0" className={inp} placeholder="0" value={row.produced_sheets} onChange={e => setRow(idx, { produced_sheets: e.target.value })} />
+                        </Field>
+                        <Field label="No. Target Sheets">
+                          <input type="number" min="0" className={inp} placeholder="0" value={row.target_sheets} onChange={e => setRow(idx, { target_sheets: e.target.value })} />
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <Field label="Production Incharge">
+                          <SearchableSelect
+                            options={employeeOptions}
+                            value={row.production_incharge_id}
+                            onChange={v => setRow(idx, { production_incharge_id: v })}
+                            placeholder="— Select —"
+                            className={inp}
+                          />
+                        </Field>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <Field label="No. of Tests Produced">
+                          <input
+                            type="number"
+                            min="0"
+                            className={inp}
+                            placeholder="0"
+                            value={row.tests_produced}
+                            onChange={e => setRow(idx, { tests_produced: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Remarks">
+                        <textarea
+                          className={`${inp} resize-none`}
+                          rows={2}
+                          placeholder="Optional production remarks..."
+                          value={row.production_remarks}
+                          onChange={e => setRow(idx, { production_remarks: e.target.value })}
+                        />
+                      </Field>
+                    </div>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <Field label="No. Sheets Produced">
-                    <input type="number" min="0" className={inp} placeholder="0" value={row.produced_sheets} onChange={e => setRow(idx, { produced_sheets: e.target.value })} />
-                  </Field>
-                  <Field label="No. Target Sheets">
-                    <input type="number" min="0" className={inp} placeholder="0" value={row.target_sheets} onChange={e => setRow(idx, { target_sheets: e.target.value })} />
-                  </Field>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <Field label="Production Incharge">
-                    <select className={inp} value={row.production_incharge_id} onChange={e => setRow(idx, { production_incharge_id: e.target.value })}>
-                      <option value="">— Select —</option>
-                      {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                    </select>
-                  </Field>
-                </div>
-                <Field label="Remarks">
-                  <textarea
-                    className={`${inp} resize-none`}
-                    rows={2}
-                    placeholder="Optional production remarks..."
-                    value={row.production_remarks}
-                    onChange={e => setRow(idx, { production_remarks: e.target.value })}
-                  />
-                </Field>
-              </div>
-            ))}
+              );
+            })}
           </SectionCard>
 
           {/* ── CARD 2: PACKAGING ───────────────────────────────────── */}
@@ -825,10 +909,13 @@ export default function ProductionDataPage() {
             {/* Shared staffing fields at top */}
             <div className="grid grid-cols-2 gap-4 mb-5">
               <Field label="Packaging Incharge" error={E.pkg_incharge_id}>
-                <select className={inp} value={form.pkg_incharge_id} onChange={e => setF({ pkg_incharge_id: e.target.value })}>
-                  <option value="">— Select —</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
+                <SearchableSelect
+                  options={employeeOptions}
+                  value={form.pkg_incharge_id}
+                  onChange={v => setF({ pkg_incharge_id: v })}
+                  placeholder="— Select —"
+                  className={inp}
+                />
               </Field>
               <Field label="Employees in Packaging" error={E.pkg_employees}>
                 <input type="number" min="0" className={inp} placeholder="0" value={form.pkg_employees} onChange={e => setF({ pkg_employees: e.target.value })} />
@@ -841,10 +928,13 @@ export default function ProductionDataPage() {
                 <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">Product {idx + 1}</p>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <Field label="Product">
-                    <select className={inp} value={row.product_id} onChange={e => setPkgRow(idx, { product_id: e.target.value })}>
-                      <option value="">— Select Product —</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      options={productOptions}
+                      value={row.product_id}
+                      onChange={v => setPkgRow(idx, { product_id: v })}
+                      placeholder="— Select Product —"
+                      className={inp}
+                    />
                   </Field>
                   <Field label="No. of Tests" error={E[`pkg_${idx}_pouches`]}>
                     <input type="number" min="0" className={inp} placeholder="0" value={row.pouches} onChange={e => setPkgRow(idx, { pouches: e.target.value })} />

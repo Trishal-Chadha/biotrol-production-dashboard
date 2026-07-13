@@ -48,6 +48,9 @@ export type ProductionData = {
   production_employees: number;
   production_incharge_id: string | null;
   production_remarks: string | null;
+  prod_tests_1: number | null;
+  prod_tests_2: number | null;
+  prod_tests_3: number | null;
   pkg_product_id: string | null;
   pkg_employees: number | null;
   pkg_incharge_id: string | null;
