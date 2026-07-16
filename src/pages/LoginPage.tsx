@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, AlertCircle, UserPlus, CheckCircle, User, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, Activity, Lock, Mail, AlertCircle, UserPlus, CheckCircle, User, ChevronDown } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import type { UserRole } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -134,8 +134,8 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-xl shadow-blue-200/40 border border-gray-100 overflow-hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-[#0f2744] to-[#1a3a5c] px-8 py-8 text-center">
-            <div className="flex items-center justify-center mb-4">
-              <img src="/logo.png" alt="Biotrol Laboratories Pvt. Ltd." className="h-14 w-auto object-contain" />
+            <div className="inline-flex items-center justify-center w-14 h-14 bg-blue-500 rounded-xl shadow-lg shadow-blue-400/30 mb-4">
+              <Activity size={28} className="text-white" strokeWidth={2.5} />
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight">BIOTROL</h1>
             <p className="text-blue-200 text-xs font-medium tracking-wider mt-1">PROFESSIONAL</p>
