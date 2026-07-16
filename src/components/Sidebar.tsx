@@ -81,7 +81,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-white/10 min-h-[64px]">
         <div className="flex items-center gap-2 overflow-hidden">
-          <img src="/logo.png" alt="Biotrol Laboratories Pvt. Ltd." className="h-8 w-auto object-contain" />
+          <img src="/Screenshot_2026-07-13_135239 copy.png" alt="Biotrol Laboratories Pvt. Ltd." className="h-8 w-auto object-contain" />
         </div>
       </div>
 

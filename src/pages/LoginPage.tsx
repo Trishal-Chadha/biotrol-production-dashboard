@@ -135,7 +135,7 @@ export default function LoginPage() {
           {/* Header */}
           <div className="bg-gradient-to-r from-[#0f2744] to-[#1a3a5c] px-8 py-8 text-center">
             <div className="flex items-center justify-center mb-4">
-              <img src="/logo.png" alt="Biotrol Laboratories Pvt. Ltd." className="h-14 w-auto object-contain" />
+              <img src="/Screenshot_2026-07-13_135239 copy.png" alt="Biotrol Laboratories Pvt. Ltd." className="h-14 w-auto object-contain" />
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight">BIOTROL</h1>
             <p className="text-blue-200 text-xs font-medium tracking-wider mt-1">PROFESSIONAL</p>
