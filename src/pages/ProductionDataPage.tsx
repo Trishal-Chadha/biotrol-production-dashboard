@@ -115,7 +115,7 @@ function SectionCard({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -291,6 +291,7 @@ export default function ProductionDataPage() {
     if (!f.entry_date) errs.push('Date is required.');
     const row1 = f.productRows[0];
     if (!row1.product_id) errs.push('Product 1 is required.');
+    if (!row1.batch_number.trim()) errs.push('Batch Number for Product 1 is required.');
     return errs;
   }
 
