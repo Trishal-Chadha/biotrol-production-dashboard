@@ -6,7 +6,6 @@ import {
   BarChart2,
   Users,
   ChevronRight,
-  Activity,
   LogOut,
   BarChart3,
   Settings,
@@ -82,13 +81,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-white/10 min-h-[64px]">
         <div className="flex items-center gap-2 overflow-hidden">
-          <div className="bg-blue-500 rounded-lg p-1.5 flex-shrink-0">
-            <Activity size={16} className="text-white" />
-          </div>
-          <div className="leading-tight overflow-hidden">
-            <p className="text-xs font-bold text-white truncate">BIOTROL</p>
-            <p className="text-[10px] text-blue-300 truncate">Professional</p>
-          </div>
+          <img src="/logo.png" alt="Biotrol Laboratories Pvt. Ltd." className="h-8 w-auto object-contain" />
         </div>
       </div>
 
