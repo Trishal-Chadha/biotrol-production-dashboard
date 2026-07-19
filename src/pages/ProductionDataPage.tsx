@@ -89,8 +89,8 @@ const emptyForm = (): FormState => ({
   entry_date: today(),
   production_employees: '',
   day_remarks: '',
-  productRows: [emptyProductRow(), emptyProductRow(), emptyProductRow()],
-  pkgRows: [emptyPkgRow(), emptyPkgRow(), emptyPkgRow()],
+  productRows: [emptyProductRow(), emptyProductRow(), emptyProductRow(), emptyProductRow(), emptyProductRow(), emptyProductRow()],
+  pkgRows: [emptyPkgRow(), emptyPkgRow(), emptyPkgRow(), emptyPkgRow(), emptyPkgRow(), emptyPkgRow()],
   pkg_employees: '',
 });
 
@@ -274,6 +274,9 @@ export default function ProductionDataPage() {
         },
         emptyProductRow(),
         emptyProductRow(),
+        emptyProductRow(),
+        emptyProductRow(),
+        emptyProductRow(),
       ],
       pkgRows: [
         {
@@ -290,6 +293,21 @@ export default function ProductionDataPage() {
           product_id: r.pkg_product_id_3 ?? '',
           pouches: r.pkg_pouches_3?.toString() ?? '',
           remarks: r.pkg_remarks_3 ?? '',
+        },
+        {
+          product_id: r.pkg_product_id_4 ?? '',
+          pouches: r.pkg_pouches_4?.toString() ?? '',
+          remarks: r.pkg_remarks_4 ?? '',
+        },
+        {
+          product_id: r.pkg_product_id_5 ?? '',
+          pouches: r.pkg_pouches_5?.toString() ?? '',
+          remarks: r.pkg_remarks_5 ?? '',
+        },
+        {
+          product_id: r.pkg_product_id_6 ?? '',
+          pouches: r.pkg_pouches_6?.toString() ?? '',
+          remarks: r.pkg_remarks_6 ?? '',
         },
       ],
       pkg_employees: r.pkg_employees?.toString() ?? '',
@@ -337,6 +355,15 @@ export default function ProductionDataPage() {
       pkg_product_id_3: form.pkgRows[2].product_id || null,
       pkg_pouches_3: form.pkgRows[2].pouches ? numOrZero(form.pkgRows[2].pouches) : null,
       pkg_remarks_3: form.pkgRows[2].remarks.trim() || null,
+      pkg_product_id_4: form.pkgRows[3].product_id || null,
+      pkg_pouches_4: form.pkgRows[3].pouches ? numOrZero(form.pkgRows[3].pouches) : null,
+      pkg_remarks_4: form.pkgRows[3].remarks.trim() || null,
+      pkg_product_id_5: form.pkgRows[4].product_id || null,
+      pkg_pouches_5: form.pkgRows[4].pouches ? numOrZero(form.pkgRows[4].pouches) : null,
+      pkg_remarks_5: form.pkgRows[4].remarks.trim() || null,
+      pkg_product_id_6: form.pkgRows[5].product_id || null,
+      pkg_pouches_6: form.pkgRows[5].pouches ? numOrZero(form.pkgRows[5].pouches) : null,
+      pkg_remarks_6: form.pkgRows[5].remarks.trim() || null,
     };
 
     try {
@@ -353,6 +380,9 @@ export default function ProductionDataPage() {
           prod_tests_1: numOrZero(form.productRows[0].tests_produced) || null,
           prod_tests_2: numOrZero(form.productRows[1].tests_produced) || null,
           prod_tests_3: numOrZero(form.productRows[2].tests_produced) || null,
+          prod_tests_4: numOrZero(form.productRows[3].tests_produced) || null,
+          prod_tests_5: numOrZero(form.productRows[4].tests_produced) || null,
+          prod_tests_6: numOrZero(form.productRows[5].tests_produced) || null,
         };
         const { error } = await supabase.from('production_data').update(payload).eq('id', editId);
         if (error) { setErrors([error.message]); setSaving(false); return; }
@@ -369,6 +399,9 @@ export default function ProductionDataPage() {
           prod_tests_1: i === 0 ? (numOrZero(form.productRows[0].tests_produced) || null) : null,
           prod_tests_2: i === 1 ? (numOrZero(form.productRows[1].tests_produced) || null) : null,
           prod_tests_3: i === 2 ? (numOrZero(form.productRows[2].tests_produced) || null) : null,
+          prod_tests_4: i === 3 ? (numOrZero(form.productRows[3].tests_produced) || null) : null,
+          prod_tests_5: i === 4 ? (numOrZero(form.productRows[4].tests_produced) || null) : null,
+          prod_tests_6: i === 5 ? (numOrZero(form.productRows[5].tests_produced) || null) : null,
         }));
         const { error } = await supabase.from('production_data').insert(payloads);
         if (error) { setErrors([error.message]); setSaving(false); return; }
@@ -981,7 +1014,7 @@ export default function ProductionDataPage() {
                     <td className="px-4 py-3 text-gray-500 text-right">{r.target_sheets?.toLocaleString() ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-700 text-right">{r.prod_tests_1?.toLocaleString() ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-700 text-right">
-                      {((r.pkg_pouches ?? 0) + (r.pkg_pouches_2 ?? 0) + (r.pkg_pouches_3 ?? 0)).toLocaleString() || '—'}
+                      {((r.pkg_pouches ?? 0) + (r.pkg_pouches_2 ?? 0) + (r.pkg_pouches_3 ?? 0) + (r.pkg_pouches_4 ?? 0) + (r.pkg_pouches_5 ?? 0) + (r.pkg_pouches_6 ?? 0)).toLocaleString() || '—'}
                     </td>
                     <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
@@ -1015,6 +1048,12 @@ export default function ProductionDataPage() {
                           <Row label="Pkg Tests 2" value={r.pkg_pouches_2?.toLocaleString() ?? '—'} />
                           <Row label="Packaging Product 3" value={r.pkg_product_id_3 ? 'Set' : '—'} />
                           <Row label="Pkg Tests 3" value={r.pkg_pouches_3?.toLocaleString() ?? '—'} />
+                          <Row label="Packaging Product 4" value={r.pkg_product_id_4 ? 'Set' : '—'} />
+                          <Row label="Pkg Tests 4" value={r.pkg_pouches_4?.toLocaleString() ?? '—'} />
+                          <Row label="Packaging Product 5" value={r.pkg_product_id_5 ? 'Set' : '—'} />
+                          <Row label="Pkg Tests 5" value={r.pkg_pouches_5?.toLocaleString() ?? '—'} />
+                          <Row label="Packaging Product 6" value={r.pkg_product_id_6 ? 'Set' : '—'} />
+                          <Row label="Pkg Tests 6" value={r.pkg_pouches_6?.toLocaleString() ?? '—'} />
                           <Row label="Packaging Employees" value={r.pkg_employees?.toString() ?? '—'} />
                           {r.production_remarks && <Row label="Production Remarks" value={r.production_remarks} />}
                           {r.day_remarks && <Row label="Day Remarks" value={r.day_remarks} />}

@@ -51,6 +51,9 @@ export type ProductionData = {
   prod_tests_1: number | null;
   prod_tests_2: number | null;
   prod_tests_3: number | null;
+  prod_tests_4: number | null;
+  prod_tests_5: number | null;
+  prod_tests_6: number | null;
   pkg_product_id: string | null;
   pkg_employees: number | null;
   pkg_incharge_id: string | null;
@@ -62,6 +65,15 @@ export type ProductionData = {
   pkg_product_id_3: string | null;
   pkg_pouches_3: number | null;
   pkg_remarks_3: string | null;
+  pkg_product_id_4: string | null;
+  pkg_pouches_4: number | null;
+  pkg_remarks_4: string | null;
+  pkg_product_id_5: string | null;
+  pkg_pouches_5: number | null;
+  pkg_remarks_5: string | null;
+  pkg_product_id_6: string | null;
+  pkg_pouches_6: number | null;
+  pkg_remarks_6: string | null;
   test_pouch_produced: number;
   day_remarks: string | null;
   created_at: string;
