@@ -1,986 +1,459 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import {
-  Plus, Eye, Pencil, Trash2, X, ChevronLeft, ChevronRight,
-  Search, Calendar, Package2, Layers, Users, CheckCircle2,
-  AlertCircle, RotateCcw, ChevronDown,
-} from 'lucide-react';
-import { supabase, Product, Employee, ProductionData } from '../lib/supabase';
-import PageHeader from '../components/PageHeader';
-import SearchableSelect from '../components/SearchableSelect';
+import * as XLSX from 'xlsx';
+import type { ProductionData, Product } from './supabase';
+import { supabase } from './supabase';
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
+// Shared helpers
+// ───────────────────────────────────────────────────────────────────────────
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
-
-function fmtDate(d: string | null) {
-  if (!d) return '—';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y}`;
+function normalizeHeader(h: string): string {
+  return String(h ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s_\-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
-function startOfMonth() {
-  const n = new Date();
-  return new Date(n.getFullYear(), n.getMonth(), 1).toISOString().slice(0, 10);
+function parseDate(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === 'number') {
+    const d = new Date(Math.round((value - 25569) * 86400 * 1000));
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  const s = String(value).trim();
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let [, a, b, y] = m;
+    if (y.length === 2) y = '20' + y;
+    const day = a.padStart(2, '0');
+    const mon = b.padStart(2, '0');
+    return `${y}-${mon}-${day}`;
+  }
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return null;
 }
 
-const PAGE_SIZE = 15;
-
-// ─── shared input style ───────────────────────────────────────────────────────
-
-const inp =
-  'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all bg-white placeholder:text-gray-400';
-
-// ─── empty form ───────────────────────────────────────────────────────────────
-
-interface ProductRow {
-  product_id: string;
-  batch_number: string;
-  produced_sheets: string;
-  target_sheets: string;
-  production_incharge_id: string;
-  production_remarks: string;
+function parseNumber(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return isNaN(value) ? null : value;
+  const s = String(value).trim().replace(/,/g, '');
+  if (s === '') return null;
+  const n = Number(s);
+  return isNaN(n) ? null : n;
 }
 
-const emptyProductRow = (): ProductRow => ({
-  product_id: '',
-  batch_number: '',
-  produced_sheets: '',
-  target_sheets: '',
-  production_incharge_id: '',
-  production_remarks: '',
-});
-
-interface PackagingRow {
-  product_id: string;
-  pouches: string;
-  remarks: string;
+function parseText(value: unknown): string | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === '' ? null : s;
 }
 
-const emptyPackagingRow = (): PackagingRow => ({
-  product_id: '',
-  pouches: '',
-  remarks: '',
-});
-
-const emptyForm = () => ({
-  entry_date: todayIso(),
-  productRows: [emptyProductRow(), emptyProductRow(), emptyProductRow()],
-  production_employees: '',
-  pkgRows: [emptyPackagingRow(), emptyPackagingRow(), emptyPackagingRow()],
-  pkg_employees: '',
-  pkg_incharge_id: '',
-  test_pouch_produced: '',
-  day_remarks: '',
-});
-
-type FormState = ReturnType<typeof emptyForm>;
-
-// ─── validation ───────────────────────────────────────────────────────────────
-
-interface FieldErrors {
-  [key: string]: string;
+function resolveProductId(value: unknown, products: Product[]): string | null {
+  if (value == null || value === '') return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  for (const p of products) if (p.id === s) return p.id;
+  const key = s.toLowerCase();
+  for (const p of products) {
+    if (p.name && p.name.trim().toLowerCase() === key) return p.id;
+    if (p.code && p.code.trim().toLowerCase() === key) return p.id;
+  }
+  for (const p of products) {
+    if (p.name && p.name.trim().toLowerCase().includes(key)) return p.id;
+  }
+  return null;
 }
 
-function validate(f: FormState): FieldErrors {
-  const e: FieldErrors = {};
-  if (!f.entry_date) e.entry_date = 'Required';
-  f.productRows.forEach((row, idx) => {
-    if (row.produced_sheets !== '' && Number(row.produced_sheets) < 0) e[`row_${idx}_produced_sheets`] = 'Must be ≥ 0';
-    if (row.target_sheets !== '' && Number(row.target_sheets) < 0) e[`row_${idx}_target_sheets`] = 'Must be ≥ 0';
+function resolveProductName(id: string | null | undefined, products: Product[]): string {
+  if (!id) return '';
+  const p = products.find(x => x.id === id);
+  return p?.name ?? '';
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Import — row type & column mapping
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface ImportRow {
+  entry_date: string | null;
+  product: string | null;
+  batch_number: string | null;
+  produced_sheets: number | null;
+  target_sheets: number | null;
+  prod_tests_1: number | null;
+  production_employees: number | null;
+  production_remarks: string | null;
+  day_remarks: string | null;
+  pkg_employees: number | null;
+  pkg_product: string | null;
+  pkg_pouches: number | null;
+  pkg_remarks: string | null;
+  pkg_product_2: string | null;
+  pkg_pouches_2: number | null;
+  pkg_remarks_2: string | null;
+  pkg_product_3: string | null;
+  pkg_pouches_3: number | null;
+  pkg_remarks_3: string | null;
+}
+
+const IMPORT_FIELDS: Record<keyof ImportRow, string[]> = {
+  entry_date: ['entry_date', 'date', 'entrydate', 'entry_date', 'entry date', 'production_date', 'production date', 'datum'],
+  product: ['product', 'product_name', 'product name', 'products', 'productname', 'product_1', 'product 1', 'main_product', 'main product', 'product_id', 'product id'],
+  batch_number: ['batch_number', 'batch number', 'batch_no', 'batch no', 'batchnumber', 'batch', 'batch_no_', 'batch no.'],
+  produced_sheets: ['produced_sheets', 'produced sheets', 'producedsheets', 'sheets', 'sheets_produced', 'sheets produced', 'produced_units', 'produced units', 'units', 'produced units'],
+  target_sheets: ['target_sheets', 'target sheets', 'targetsheets', 'target', 'target_sheets_', 'target units'],
+  prod_tests_1: ['prod_tests_1', 'prod tests 1', 'tests_produced', 'tests produced', 'no_of_tests_produced', 'no of tests produced', 'no of tests', 'no. of tests produced', 'no. of tests', 'tests', 'tests_1', 'tests 1', 'tests produced 1'],
+  production_employees: ['production_employees', 'production employees', 'prod employees', 'productionemployees', 'employees', 'prod_employees', 'no of employees', 'no. of employees'],
+  production_remarks: ['production_remarks', 'production remarks', 'prod remarks', 'productionremarks', 'remarks', 'prod_remarks', 'production notes'],
+  day_remarks: ['day_remarks', 'day remarks', 'dayremarks', 'day notes', 'notes'],
+  pkg_employees: ['pkg_employees', 'packaging employees', 'pkg employees', 'packagingemployees', 'packaging_employees', 'packing employees'],
+  pkg_product: ['pkg_product', 'pkg product', 'packaging product', 'packaging_product', 'packaging product 1', 'pkg product 1', 'pkg_product_1', 'packaging_product_1', 'packing product', 'packing product 1', 'pkg_product_id', 'pkg product id', 'packaging product id'],
+  pkg_pouches: ['pkg_pouches', 'pkg pouches', 'pkg tests 1', 'packaging tests 1', 'pkg_tests_1', 'pouches', 'pkg_pouches_1', 'packaging_pouches', 'packaging pouches', 'no_of_tests_pkg', 'pkg tests', 'packing tests', 'packing tests 1'],
+  pkg_remarks: ['pkg_remarks', 'pkg remarks', 'packaging remarks', 'packaging remarks 1', 'pkg remarks 1', 'pkg_remarks_1', 'packaging_remarks', 'packaging_remarks_1', 'packing remarks', 'packing remarks 1'],
+  pkg_product_2: ['pkg_product_2', 'pkg product 2', 'packaging product 2', 'packaging_product_2', 'pkg_product_2_', 'packing product 2', 'pkg_product_id_2', 'pkg product id 2', 'packaging product id 2'],
+  pkg_pouches_2: ['pkg_pouches_2', 'pkg pouches 2', 'pkg tests 2', 'packaging tests 2', 'pkg_tests_2', 'packaging_pouches_2', 'packing tests 2'],
+  pkg_remarks_2: ['pkg_remarks_2', 'pkg remarks 2', 'packaging remarks 2', 'packaging_remarks_2', 'packing remarks 2'],
+  pkg_product_3: ['pkg_product_3', 'pkg product 3', 'packaging product 3', 'packaging_product_3', 'pkg_product_3_', 'packing product 3', 'pkg_product_id_3', 'pkg product id 3', 'packaging product id 3'],
+  pkg_pouches_3: ['pkg_pouches_3', 'pkg pouches 3', 'pkg tests 3', 'packaging tests 3', 'pkg_tests_3', 'packaging_pouches_3', 'packing tests 3'],
+  pkg_remarks_3: ['pkg_remarks_3', 'pkg remarks 3', 'packaging remarks 3', 'packaging_remarks_3', 'packing remarks 3'],
+};
+
+function buildAliasIndex(): Map<string, keyof ImportRow> {
+  const idx = new Map<string, keyof ImportRow>();
+  for (const [field, aliases] of Object.entries(IMPORT_FIELDS) as [keyof ImportRow, string[]][]) {
+    for (const a of aliases) idx.set(normalizeHeader(a), field);
+  }
+  return idx;
+}
+
+const ALIAS_INDEX = buildAliasIndex();
+
+// ───────────────────────────────────────────────────────────────────────────
+// Import — file reading with header-row detection
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface ReadResult {
+  rows: ImportRow[];
+  count: number;
+  skipped: number;
+  sheetName: string;
+  headerRow: number;
+  detectedColumns: string[];
+}
+
+function isBlankRow(arr: unknown[]): boolean {
+  return arr.every(c => c == null || c === '' || (typeof c === 'string' && c.trim() === ''));
+}
+
+function scoreHeaderRow(arr: unknown[]): number {
+  let score = 0;
+  for (const cell of arr) {
+    if (cell == null || cell === '') continue;
+    const norm = normalizeHeader(String(cell));
+    if (ALIAS_INDEX.has(norm)) score++;
+  }
+  return score;
+}
+
+function mapRowToObject(
+  headerRow: unknown[],
+  dataRow: unknown[],
+): Record<string, unknown> {
+  const obj: Record<string, unknown> = {};
+  for (let i = 0; i < headerRow.length; i++) {
+    const header = headerRow[i];
+    const key = header != null ? String(header) : `__col_${i}`;
+    obj[key] = dataRow[i] ?? null;
+  }
+  return obj;
+}
+
+function buildImportRow(mapped: Partial<ImportRow>): ImportRow {
+  return {
+    entry_date: parseDate(mapped.entry_date),
+    product: parseText(mapped.product),
+    batch_number: parseText(mapped.batch_number),
+    produced_sheets: parseNumber(mapped.produced_sheets),
+    target_sheets: parseNumber(mapped.target_sheets),
+    prod_tests_1: parseNumber(mapped.prod_tests_1),
+    production_employees: parseNumber(mapped.production_employees),
+    production_remarks: parseText(mapped.production_remarks),
+    day_remarks: parseText(mapped.day_remarks),
+    pkg_employees: parseNumber(mapped.pkg_employees),
+    pkg_product: parseText(mapped.pkg_product),
+    pkg_pouches: parseNumber(mapped.pkg_pouches),
+    pkg_remarks: parseText(mapped.pkg_remarks),
+    pkg_product_2: parseText(mapped.pkg_product_2),
+    pkg_pouches_2: parseNumber(mapped.pkg_pouches_2),
+    pkg_remarks_2: parseText(mapped.pkg_remarks_2),
+    pkg_product_3: parseText(mapped.pkg_product_3),
+    pkg_pouches_3: parseNumber(mapped.pkg_pouches_3),
+    pkg_remarks_3: parseText(mapped.pkg_remarks_3),
+  };
+}
+
+function isImportRowEmpty(row: ImportRow): boolean {
+  return Object.values(row).every(
+    v => v === null || v === '' || (typeof v === 'string' && v.trim() === ''),
+  );
+}
+
+export async function readImportFile(file: File): Promise<ReadResult> {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { cellDates: true });
+
+  // find first non-empty sheet
+  let ws: XLSX.WorkSheet | null = null;
+  let sheetName = '';
+  for (const name of wb.SheetNames) {
+    const candidate = wb.Sheets[name];
+    if (candidate && candidate['!ref']) {
+      ws = candidate;
+      sheetName = name;
+      break;
+    }
+  }
+  if (!ws) return { rows: [], count: 0, skipped: 0, sheetName: '', headerRow: -1, detectedColumns: [] };
+
+  // read as array-of-arrays to detect header row
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    defval: null,
+    raw: true,
+    blankrows: false,
   });
-  f.pkgRows.forEach((row, idx) => {
-    if (row.pouches !== '' && Number(row.pouches) < 0) e[`pkg_${idx}_pouches`] = 'Must be ≥ 0';
-  });
-  if (f.production_employees !== '' && Number(f.production_employees) < 0) e.production_employees = 'Must be ≥ 0';
-  if (f.test_pouch_produced !== '' && Number(f.test_pouch_produced) < 0) e.test_pouch_produced = 'Must be ≥ 0';
-  if (f.pkg_employees !== '' && Number(f.pkg_employees) < 0) e.pkg_employees = 'Must be ≥ 0';
-  return e;
-}
 
-// ─── KPI card ─────────────────────────────────────────────────────────────────
-
-function KpiCard({
-  label, value, icon, accent, loading,
-}: {
-  label: string;
-  value: string | number;
-  icon: React.ReactNode;
-  accent: string;
-  loading: boolean;
-}) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-center gap-4">
-      <div className={`rounded-xl p-3 ${accent}`}>{icon}</div>
-      <div>
-        <p className="text-xs font-medium text-gray-500">{label}</p>
-        <p className="text-2xl font-bold text-gray-800 mt-0.5 tabular-nums">
-          {loading ? <span className="text-gray-300">—</span> : value}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── section card ─────────────────────────────────────────────────────────────
-
-function SectionCard({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100 bg-gray-50/60">
-        <span className="w-7 h-7 rounded-lg bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
-          {number}
-        </span>
-        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{title}</h3>
-      </div>
-      <div className="p-5">{children}</div>
-    </div>
-  );
-}
-
-// ─── form field wrapper ───────────────────────────────────────────────────────
-
-function Field({
-  label, error, children,
-}: {
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">
-        {label}
-      </label>
-      {children}
-      {error && (
-        <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
-          <AlertCircle size={11} /> {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ─── view modal ───────────────────────────────────────────────────────────────
-
-function ViewModal({ record, products, employees, onClose }: {
-  record: ProductionData;
-  products: Product[];
-  employees: Employee[];
-  onClose: () => void;
-}) {
-  const prod = products.find(p => p.id === record.product_id);
-  const pkgProds = [
-    products.find(p => p.id === record.pkg_product_id),
-    products.find(p => p.id === record.pkg_product_id_2),
-    products.find(p => p.id === record.pkg_product_id_3),
-  ];
-  const pkgPouches = [record.pkg_pouches, record.pkg_pouches_2, record.pkg_pouches_3];
-  const pkgRemarks = [record.pkg_remarks, record.pkg_remarks_2, record.pkg_remarks_3];
-  const prodIncharge = employees.find(e => e.id === record.production_incharge_id);
-  const pkgIncharge = employees.find(e => e.id === record.pkg_incharge_id);
-
-  function Row({ label, value }: { label: string; value: React.ReactNode }) {
-    return (
-      <div className="flex py-2.5 border-b border-gray-50 last:border-0">
-        <span className="text-xs font-medium text-gray-500 w-48 flex-shrink-0">{label}</span>
-        <span className="text-sm text-gray-800 font-medium">{value ?? '—'}</span>
-      </div>
-    );
+  if (aoa.length === 0) {
+    return { rows: [], count: 0, skipped: 0, sheetName, headerRow: -1, detectedColumns: [] };
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-base font-bold text-gray-800">Production Record</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Batch: {record.batch_number} · {fmtDate(record.entry_date)}</p>
-          </div>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
-          <div>
-            <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2">Production</p>
-            <Row label="Date" value={fmtDate(record.entry_date)} />
-            <Row label="Product" value={prod?.name} />
-            <Row label="Batch Number" value={record.batch_number} />
-            <Row label="No. Sheets Produced" value={record.produced_sheets.toLocaleString()} />
-            <Row label="Target Sheets" value={record.target_sheets.toLocaleString()} />
-            <Row label="Production Employees" value={record.production_employees} />
-            <Row label="Production Incharge" value={prodIncharge?.name} />
-            {record.production_remarks && <Row label="Remarks" value={record.production_remarks} />}
-          </div>
-          <div>
-            <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2">Packaging</p>
-            <Row label="Packaging Employees" value={record.pkg_employees} />
-            <Row label="Packaging Incharge" value={pkgIncharge?.name} />
-            {[0, 1, 2].map(i => (pkgProds[i] || pkgPouches[i] != null || pkgRemarks[i]) && (
-              <div key={i} className="pt-2 first:pt-0">
-                {i > 0 && <div className="border-t border-gray-100 my-2" />}
-                <p className="text-[10px] font-semibold text-gray-400 uppercase mb-1">Product {i + 1}</p>
-                <Row label="Product" value={pkgProds[i]?.name} />
-                <Row label="No. of Tests" value={pkgPouches[i]} />
-                {pkgRemarks[i] && <Row label="Remarks" value={pkgRemarks[i]} />}
-              </div>
-            ))}
-          </div>
-          <div>
-            <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2">Final Details</p>
-            <Row label="Test / Pouch Produced" value={record.test_pouch_produced.toLocaleString()} />
-            {record.day_remarks && <Row label="Remarks of Day" value={record.day_remarks} />}
-          </div>
-        </div>
-        <div className="px-6 py-3 border-t border-gray-100 flex justify-end">
-          <button onClick={onClose} className="px-5 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  // detect header row: scan first 15 rows, pick the one with highest alias score
+  let bestRow = -1;
+  let bestScore = 0;
+  const scanLimit = Math.min(aoa.length, 15);
+  for (let i = 0; i < scanLimit; i++) {
+    const score = scoreHeaderRow(aoa[i]);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = i;
+    }
+  }
+
+  // fallback to first row if no aliases matched
+  if (bestRow < 0) bestRow = 0;
+
+  const headerArr = aoa[bestRow];
+  const detectedColumns = headerArr
+    .filter(c => c != null && String(c).trim() !== '')
+    .map(c => String(c).trim());
+
+  const rows: ImportRow[] = [];
+  let skipped = 0;
+
+  for (let i = bestRow + 1; i < aoa.length; i++) {
+    const arr = aoa[i];
+    if (!arr || isBlankRow(arr)) {
+      skipped++;
+      continue;
+    }
+
+    const obj = mapRowToObject(headerArr, arr);
+    const mapped: Partial<ImportRow> = {};
+    for (const [header, val] of Object.entries(obj)) {
+      const field = ALIAS_INDEX.get(normalizeHeader(header));
+      if (field) mapped[field] = val as any;
+    }
+
+    const row = buildImportRow(mapped);
+    if (isImportRowEmpty(row)) {
+      skipped++;
+      continue;
+    }
+    rows.push(row);
+  }
+
+  return { rows, count: rows.length, skipped, sheetName, headerRow: bestRow, detectedColumns };
 }
 
-// ─── main component ───────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────────────
+// Build Supabase insert payload from a single import row
+// ───────────────────────────────────────────────────────────────────────────
 
-export default function ProductionDataPage() {
-  const [records, setRecords] = useState<ProductionData[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState(true);
+export type ProductionInsertPayload = Record<string, unknown>;
 
-  // drawer
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm());
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [saving, setSaving] = useState(false);
+export function rowToPayload(
+  r: ImportRow,
+  products: Product[],
+): ProductionInsertPayload {
+  const today = new Date().toISOString().slice(0, 10);
+  const producedSheets = r.produced_sheets ?? 0;
+  return {
+    entry_date: r.entry_date ?? today,
+    product_id: resolveProductId(r.product, products),
+    batch_number: r.batch_number ?? '',
+    produced_sheets: producedSheets,
+    produced_units: producedSheets,
+    target_sheets: r.target_sheets ?? 0,
+    production_employees: r.production_employees ?? 0,
+    production_incharge_id: null,
+    production_remarks: r.production_remarks ?? null,
+    prod_tests_1: r.prod_tests_1 ?? null,
+    prod_tests_2: null,
+    prod_tests_3: null,
+    pkg_product_id: resolveProductId(r.pkg_product, products),
+    pkg_employees: r.pkg_employees ?? null,
+    pkg_incharge_id: null,
+    pkg_pouches: r.pkg_pouches ?? null,
+    pkg_remarks: r.pkg_remarks ?? null,
+    pkg_product_id_2: resolveProductId(r.pkg_product_2, products),
+    pkg_pouches_2: r.pkg_pouches_2 ?? null,
+    pkg_remarks_2: r.pkg_remarks_2 ?? null,
+    pkg_product_id_3: resolveProductId(r.pkg_product_3, products),
+    pkg_pouches_3: r.pkg_pouches_3 ?? null,
+    pkg_remarks_3: r.pkg_remarks_3 ?? null,
+    test_pouch_produced: 0,
+    day_remarks: r.day_remarks ?? null,
+  };
+}
 
-  // accordion open-state for product rows: Product 1 expanded, 2 & 3 collapsed
-  const [openProd, setOpenProd] = useState<boolean[]>([true, false, false]);
-  const toggleProd = (idx: number) =>
-    setOpenProd(prev => prev.map((o, i) => (i === idx ? !o : o)));
+export function rowsToInsertPayloads(
+  rows: ImportRow[],
+  products: Product[],
+): ProductionInsertPayload[] {
+  return rows.map(r => rowToPayload(r, products));
+}
 
-  // view modal
-  const [viewRecord, setViewRecord] = useState<ProductionData | null>(null);
+// ───────────────────────────────────────────────────────────────────────────
+// Import — insert rows individually, track per-row results
+// ───────────────────────────────────────────────────────────────────────────
 
-  // filters
-  const [searchQ, setSearchQ] = useState('');
-  const [filterProduct, setFilterProduct] = useState('');
-  const [filterFrom, setFilterFrom] = useState('');
-  const [filterTo, setFilterTo] = useState('');
+export interface ImportFailure {
+  rowNumber: number;
+  reason: string;
+}
 
-  // pagination
-  const [page, setPage] = useState(1);
+export interface ImportReport {
+  total: number;
+  imported: number;
+  failed: number;
+  skipped: number;
+  failures: ImportFailure[];
+}
 
-  // ── data fetch ───────────────────────────────────────────────────────────
+export async function insertImportRows(
+  rows: ImportRow[],
+  products: Product[],
+): Promise<ImportReport> {
+  const failures: ImportFailure[] = [];
+  let imported = 0;
+  let skipped = 0;
 
-  const fetchRecords = useCallback(async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('production_data')
-      .select('*')
-      .order('entry_date', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (data) setRecords(data as ProductionData[]);
-    setLoading(false);
-  }, []);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowNumber = i + 1;
 
-  useEffect(() => {
-    async function init() {
-      const [{ data: prod }, { data: emp }] = await Promise.all([
-        supabase.from('products').select('*').eq('active', true).order('name'),
-        supabase.from('employees').select('*').eq('active', true).order('name'),
-      ]);
-      if (prod) setProducts(prod);
-      if (emp) setEmployees(emp);
+    if (isImportRowEmpty(row)) {
+      skipped++;
+      continue;
     }
-    init();
-    fetchRecords();
-  }, [fetchRecords]);
 
-  // ── KPI calculations ─────────────────────────────────────────────────────
+    const payload = rowToPayload(row, products);
 
-  const kpis = useMemo(() => {
-    const t = todayIso();
-    const ms = startOfMonth();
-    return {
-      total: records.length,
-      today: records.filter(r => r.entry_date === t).length,
-      month: records.filter(r => r.entry_date >= ms).length,
-      totalUnits: records.reduce((s, r) => s + (r.produced_units || 0), 0),
-    };
-  }, [records]);
-
-  // unique batch numbers from existing records — for the Batch searchable dropdown
-  const batchOptions = useMemo(() => {
-    const set = new Set(records.map(r => r.batch_number).filter(Boolean));
-    return Array.from(set).sort();
-  }, [records]);
-
-  // product + employee option lists for SearchableSelect
-  const productOptions = useMemo(
-    () => products.map(p => ({ value: p.id, label: p.name })),
-    [products],
-  );
-  const employeeOptions = useMemo(
-    () => employees.map(e => ({ value: e.id, label: e.name })),
-    [employees],
-  );
-  const batchSelOptions = useMemo(
-    () => batchOptions.map(b => ({ value: b, label: b })),
-    [batchOptions],
-  );
-
-  // ── filtered + paginated ─────────────────────────────────────────────────
-
-  const filtered = useMemo(() => {
-    return records.filter(r => {
-      if (filterProduct && r.product_id !== filterProduct) return false;
-      if (filterFrom && r.entry_date < filterFrom) return false;
-      if (filterTo && r.entry_date > filterTo) return false;
-      if (searchQ) {
-        const q = searchQ.toLowerCase();
-        const prod = products.find(p => p.id === r.product_id);
-        const haystack = [r.batch_number, r.entry_date, prod?.name ?? ''].join(' ').toLowerCase();
-        if (!haystack.includes(q)) return false;
+    try {
+      const { error } = await supabase
+        .from('production_data')
+        .insert(payload);
+      if (error) {
+        failures.push({ rowNumber, reason: error.message });
+      } else {
+        imported++;
       }
-      return true;
-    });
-  }, [records, filterProduct, filterFrom, filterTo, searchQ, products]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  // reset page when filters change
-  useEffect(() => { setPage(1); }, [filterProduct, filterFrom, filterTo, searchQ]);
-
-  // ── drawer helpers ───────────────────────────────────────────────────────
-
-  function openAdd() {
-    setForm(emptyForm());
-    setFieldErrors({});
-    setEditId(null);
-    setOpenProd([true, false, false]);
-    setDrawerOpen(true);
-  }
-
-  function openEdit(r: ProductionData) {
-    setForm({
-      entry_date: r.entry_date,
-      productRows: [
-        {
-          product_id: r.product_id ?? '',
-          batch_number: r.batch_number,
-          produced_sheets: String(r.produced_sheets),
-          target_sheets: String(r.target_sheets),
-          production_incharge_id: r.production_incharge_id ?? '',
-          production_remarks: r.production_remarks ?? '',
-        },
-        emptyProductRow(),
-        emptyProductRow(),
-      ],
-      production_employees: String(r.production_employees),
-      pkgRows: [
-        { product_id: r.pkg_product_id ?? '', pouches: r.pkg_pouches != null ? String(r.pkg_pouches) : '', remarks: r.pkg_remarks ?? '' },
-        { product_id: r.pkg_product_id_2 ?? '', pouches: r.pkg_pouches_2 != null ? String(r.pkg_pouches_2) : '', remarks: r.pkg_remarks_2 ?? '' },
-        { product_id: r.pkg_product_id_3 ?? '', pouches: r.pkg_pouches_3 != null ? String(r.pkg_pouches_3) : '', remarks: r.pkg_remarks_3 ?? '' },
-      ],
-      pkg_employees: r.pkg_employees != null ? String(r.pkg_employees) : '',
-      pkg_incharge_id: r.pkg_incharge_id ?? '',
-      test_pouch_produced: String(r.test_pouch_produced),
-      day_remarks: r.day_remarks ?? '',
-    });
-    setFieldErrors({});
-    setEditId(r.id);
-    // open the first product section that has a product selected
-    const filled = (r.product_id ? 0 : -1);
-    setOpenProd([filled === 0, false, false]);
-    setDrawerOpen(true);
-  }
-
-  function closeDrawer() {
-    setDrawerOpen(false);
-    setEditId(null);
-  }
-
-  function clearForm() {
-    setForm(emptyForm());
-    setFieldErrors({});
-  }
-
-  function setF(patch: Partial<FormState>) {
-    setForm(f => ({ ...f, ...patch }));
-  }
-
-  function setRow(idx: number, patch: Partial<ProductRow>) {
-    setForm(f => ({
-      ...f,
-      productRows: f.productRows.map((r, i) => i === idx ? { ...r, ...patch } : r),
-    }));
-  }
-
-  function setPkgRow(idx: number, patch: Partial<PackagingRow>) {
-    setForm(f => ({
-      ...f,
-      pkgRows: f.pkgRows.map((r, i) => i === idx ? { ...r, ...patch } : r),
-    }));
-  }
-
-  // ── save ─────────────────────────────────────────────────────────────────
-
-  async function handleSave(andNew = false) {
-    const errs = validate(form);
-    if (Object.keys(errs).length) { setFieldErrors(errs); return; }
-    setSaving(true);
-    setFieldErrors({});
-
-    const numOrZero = (v: string) => v === '' ? 0 : Number(v) || 0;
-
-    const packagingFields = {
-      pkg_employees: form.pkg_employees !== '' ? Number(form.pkg_employees) : null,
-      pkg_incharge_id: form.pkg_incharge_id || null,
-      pkg_product_id: form.pkgRows[0].product_id || null,
-      pkg_pouches: form.pkgRows[0].pouches !== '' ? Number(form.pkgRows[0].pouches) : null,
-      pkg_remarks: form.pkgRows[0].remarks.trim() || null,
-      pkg_product_id_2: form.pkgRows[1].product_id || null,
-      pkg_pouches_2: form.pkgRows[1].pouches !== '' ? Number(form.pkgRows[1].pouches) : null,
-      pkg_remarks_2: form.pkgRows[1].remarks.trim() || null,
-      pkg_product_id_3: form.pkgRows[2].product_id || null,
-      pkg_pouches_3: form.pkgRows[2].pouches !== '' ? Number(form.pkgRows[2].pouches) : null,
-      pkg_remarks_3: form.pkgRows[2].remarks.trim() || null,
-    };
-
-    const commonFields = {
-      entry_date: form.entry_date || todayIso(),
-      production_employees: numOrZero(form.production_employees),
-      test_pouch_produced: numOrZero(form.test_pouch_produced),
-      day_remarks: form.day_remarks.trim() || null,
-      ...packagingFields,
-    };
-
-    if (editId) {
-      const row = form.productRows[0];
-      const payload = {
-        ...commonFields,
-        product_id: row.product_id || null,
-        batch_number: row.batch_number.trim(),
-        produced_sheets: numOrZero(row.produced_sheets),
-        produced_units: numOrZero(row.produced_sheets),
-        target_sheets: numOrZero(row.target_sheets),
-        production_incharge_id: row.production_incharge_id || null,
-        production_remarks: row.production_remarks.trim() || null,
-      };
-      const { error: err } = await supabase.from('production_data').update(payload).eq('id', editId);
-      setSaving(false);
-      if (err) { setFieldErrors({ _root: err.message }); return; }
-    } else {
-      const rowsWithData = form.productRows.filter(row =>
-        row.product_id || row.produced_sheets !== '' || row.batch_number.trim()
-      );
-      const insertRows = rowsWithData.length > 0 ? rowsWithData : [form.productRows[0]];
-
-      const payloads = insertRows.map(row => ({
-        ...commonFields,
-        product_id: row.product_id || null,
-        batch_number: row.batch_number.trim(),
-        produced_sheets: numOrZero(row.produced_sheets),
-        produced_units: numOrZero(row.produced_sheets),
-        target_sheets: numOrZero(row.target_sheets),
-        production_incharge_id: row.production_incharge_id || null,
-        production_remarks: row.production_remarks.trim() || null,
-      }));
-
-      const { error: err } = await supabase.from('production_data').insert(payloads);
-      setSaving(false);
-      if (err) { setFieldErrors({ _root: err.message }); return; }
-    }
-
-    fetchRecords();
-
-    if (andNew) {
-      setForm(emptyForm());
-      setFieldErrors({});
-      setEditId(null);
-    } else {
-      closeDrawer();
+    } catch (err) {
+      failures.push({ rowNumber, reason: String(err) });
     }
   }
 
-  // ── delete ───────────────────────────────────────────────────────────────
+  return {
+    total: rows.length,
+    imported,
+    failed: failures.length,
+    skipped,
+    failures,
+  };
+}
 
-  async function handleDelete(id: string) {
-    if (!confirm('Permanently delete this production record?')) return;
-    await supabase.from('production_data').delete().eq('id', id);
-    fetchRecords();
+// ───────────────────────────────────────────────────────────────────────────
+// Export
+// ───────────────────────────────────────────────────────────────────────────
+
+const EXPORT_COLUMNS: { key: keyof ProductionData | '_productName' | '_pkgProductName' | '_pkgProductName2' | '_pkgProductName3'; label: string }[] = [
+  { key: 'entry_date', label: 'Entry Date' },
+  { key: '_productName', label: 'Product' },
+  { key: 'batch_number', label: 'Batch Number' },
+  { key: 'produced_sheets', label: 'Produced Sheets' },
+  { key: 'target_sheets', label: 'Target Sheets' },
+  { key: 'prod_tests_1', label: 'No. of Tests Produced' },
+  { key: 'production_employees', label: 'Production Employees' },
+  { key: 'production_remarks', label: 'Production Remarks' },
+  { key: 'day_remarks', label: 'Day Remarks' },
+  { key: 'pkg_employees', label: 'Packaging Employees' },
+  { key: '_pkgProductName', label: 'Packaging Product 1' },
+  { key: 'pkg_pouches', label: 'Pkg Tests 1' },
+  { key: 'pkg_remarks', label: 'Packaging Remarks 1' },
+  { key: '_pkgProductName2', label: 'Packaging Product 2' },
+  { key: 'pkg_pouches_2', label: 'Pkg Tests 2' },
+  { key: 'pkg_remarks_2', label: 'Packaging Remarks 2' },
+  { key: '_pkgProductName3', label: 'Packaging Product 3' },
+  { key: 'pkg_pouches_3', label: 'Pkg Tests 3' },
+  { key: 'pkg_remarks_3', label: 'Packaging Remarks 3' },
+];
+
+export type ExportFormat = 'xlsx' | 'csv';
+
+export function exportProduction(
+  records: ProductionData[],
+  products: Product[],
+  format: ExportFormat,
+  filename = 'production_data',
+) {
+  const data = records.map(r => {
+    const obj: Record<string, unknown> = {};
+    for (const col of EXPORT_COLUMNS) {
+      let val: unknown = '';
+      switch (col.key) {
+        case '_productName': val = r.products?.name ?? resolveProductName(r.product_id, products); break;
+        case '_pkgProductName': val = r.pkg_product?.name ?? resolveProductName(r.pkg_product_id, products); break;
+        case '_pkgProductName2': val = resolveProductName(r.pkg_product_id_2, products); break;
+        case '_pkgProductName3': val = resolveProductName(r.pkg_product_id_3, products); break;
+        default: val = (r as Record<string, unknown>)[col.key as string] ?? '';
+      }
+      obj[col.label] = val;
+    }
+    return obj;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data, {
+    header: EXPORT_COLUMNS.map(c => c.label),
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Production Data');
+
+  const ext = format === 'csv' ? 'csv' : 'xlsx';
+  const out = `${filename}.${ext}`;
+  if (format === 'csv') {
+    XLSX.writeFile(wb, out, { bookType: 'csv' });
+  } else {
+    XLSX.writeFile(wb, out, { bookType: 'xlsx' });
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-
-  function productName(id: string | null) {
-    return products.find(p => p.id === id)?.name ?? '—';
-  }
-
-  function employeeName(id: string | null) {
-    return employees.find(e => e.id === id)?.name ?? '—';
-  }
-
-  const E = fieldErrors;
-
-  // ─────────────────────────────────────────────────────────────────────────
-  return (
-    <div className="min-h-full">
-      {/* ── Page Header ─────────────────────────────────────────────────── */}
-      <PageHeader
-        title="Production Data"
-        subtitle="View and manage all production records."
-        actions={
-          <button
-            onClick={openAdd}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm shadow-blue-200 transition-all"
-          >
-            <Plus size={16} strokeWidth={2.5} /> New Entry
-          </button>
-        }
-      />
-
-      {/* ── KPI Cards ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Total Entries" value={kpis.total.toLocaleString()} loading={loading}
-          icon={<Layers size={20} className="text-blue-600" />} accent="bg-blue-50" />
-        <KpiCard label="Today's Entries" value={kpis.today} loading={loading}
-          icon={<Calendar size={20} className="text-emerald-600" />} accent="bg-emerald-50" />
-        <KpiCard label="This Month" value={kpis.month} loading={loading}
-          icon={<CheckCircle2 size={20} className="text-violet-600" />} accent="bg-violet-50" />
-        <KpiCard label="Total Units Produced" value={kpis.totalUnits.toLocaleString()} loading={loading}
-          icon={<Package2 size={20} className="text-amber-600" />} accent="bg-amber-50" />
-      </div>
-
-      {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-sm px-4 py-3 mb-4 flex flex-wrap items-center gap-3">
-        {/* Date from */}
-        <div className="flex items-center gap-1.5">
-          <Calendar size={14} className="text-gray-400" />
-          <input
-            type="date"
-            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition bg-white"
-            value={filterFrom}
-            onChange={e => setFilterFrom(e.target.value)}
-            placeholder="From"
-          />
-          <span className="text-xs text-gray-400">–</span>
-          <input
-            type="date"
-            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition bg-white"
-            value={filterTo}
-            onChange={e => setFilterTo(e.target.value)}
-          />
-        </div>
-
-        {/* Product filter */}
-        <select
-          className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition bg-white text-gray-600"
-          value={filterProduct}
-          onChange={e => setFilterProduct(e.target.value)}
-        >
-          <option value="">All Products</option>
-          {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-
-        {/* Search */}
-        <div className="ml-auto flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-1.5 bg-white min-w-[220px]">
-          <Search size={13} className="text-gray-400 flex-shrink-0" />
-          <input
-            className="text-xs flex-1 outline-none placeholder:text-gray-400 bg-transparent"
-            placeholder="Search batch, product..."
-            value={searchQ}
-            onChange={e => setSearchQ(e.target.value)}
-          />
-          {searchQ && (
-            <button onClick={() => setSearchQ('')} className="text-gray-400 hover:text-gray-600">
-              <X size={12} />
-            </button>
-          )}
-        </div>
-
-        {/* Clear filters */}
-        {(filterProduct || filterFrom || filterTo || searchQ) && (
-          <button
-            onClick={() => { setFilterProduct(''); setFilterFrom(''); setFilterTo(''); setSearchQ(''); }}
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition-colors"
-          >
-            <RotateCcw size={12} /> Clear
-          </button>
-        )}
-      </div>
-
-      {/* ── Table ───────────────────────────────────────────────────────── */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50/80 border-b border-gray-100">
-                {[
-                  'Date', 'Product', 'Batch Number',
-                  'No. Sheets Produced', 'Target Sheets',
-                  'Employees (Prod.)', 'Production Incharge', 'Actions',
-                ].map(h => (
-                  <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap ${h === 'Actions' ? 'text-right' : 'text-left'}`}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-16">
-                    <div className="flex flex-col items-center gap-2 text-gray-400">
-                      <div className="w-6 h-6 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-                      <span className="text-xs">Loading records...</span>
-                    </div>
-                  </td>
-                </tr>
-              ) : paginated.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-center py-16 text-sm text-gray-400">
-                    {records.length === 0 ? 'No production records yet. Click "+ New Entry" to create one.' : 'No records match your filters.'}
-                  </td>
-                </tr>
-              ) : paginated.map(r => (
-                <tr key={r.id} className="hover:bg-blue-50/30 transition-colors group">
-                  <td className="px-4 py-3 text-gray-700 font-medium whitespace-nowrap">{fmtDate(r.entry_date)}</td>
-                  <td className="px-4 py-3 text-gray-800 font-medium">
-                    <span className="bg-blue-50 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-md">
-                      {productName(r.product_id)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{r.batch_number}</td>
-                  <td className="px-4 py-3 text-gray-700 tabular-nums">{r.produced_sheets.toLocaleString()}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="tabular-nums text-gray-700">{r.target_sheets.toLocaleString()}</span>
-                      {r.produced_sheets >= r.target_sheets ? (
-                        <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">MET</span>
-                      ) : (
-                        <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">BELOW</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <span className="inline-flex items-center gap-1 text-gray-600">
-                      <Users size={13} className="text-gray-400" /> {r.production_employees}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{employeeName(r.production_incharge_id)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => setViewRecord(r)}
-                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="View"
-                      >
-                        <Eye size={14} />
-                      </button>
-                      <button
-                        onClick={() => openEdit(r)}
-                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Edit"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(r.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* ── Pagination ─────────────────────────────────────────────── */}
-        {filtered.length > 0 && (
-          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/40 flex items-center justify-between">
-            <p className="text-xs text-gray-500">
-              Showing <span className="font-medium text-gray-700">{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)}</span> of{' '}
-              <span className="font-medium text-gray-700">{filtered.length}</span> records
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                disabled={page === 1}
-                onClick={() => setPage(p => p - 1)}
-                className="p-1.5 rounded-lg text-gray-500 hover:bg-white hover:shadow-sm disabled:opacity-30 disabled:cursor-not-allowed transition-all border border-transparent hover:border-gray-200"
-              >
-                <ChevronLeft size={15} />
-              </button>
-              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                const p = totalPages <= 7 ? i + 1 : page <= 4 ? i + 1 : page >= totalPages - 3 ? totalPages - 6 + i : page - 3 + i;
-                return (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p)}
-                    className={`w-7 h-7 text-xs rounded-lg transition-all font-medium ${page === p ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 hover:bg-white hover:border-gray-200 border border-transparent'}`}
-                  >
-                    {p}
-                  </button>
-                );
-              })}
-              <button
-                disabled={page === totalPages}
-                onClick={() => setPage(p => p + 1)}
-                className="p-1.5 rounded-lg text-gray-500 hover:bg-white hover:shadow-sm disabled:opacity-30 disabled:cursor-not-allowed transition-all border border-transparent hover:border-gray-200"
-              >
-                <ChevronRight size={15} />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── View Modal ───────────────────────────────────────────────────── */}
-      {viewRecord && (
-        <ViewModal
-          record={viewRecord}
-          products={products}
-          employees={employees}
-          onClose={() => setViewRecord(null)}
-        />
-      )}
-
-      {/* ── Slide-over Drawer ────────────────────────────────────────────── */}
-      {/* Backdrop */}
-      <div
-        className={`fixed inset-0 bg-gray-900/50 backdrop-blur-sm z-40 transition-opacity duration-300 ${drawerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        onClick={closeDrawer}
-      />
-
-      {/* Drawer panel */}
-      <div
-        className={`fixed top-0 right-0 h-full w-[72%] min-w-[480px] max-w-5xl bg-gray-50 z-50 shadow-2xl flex flex-col transition-transform duration-300 ease-in-out ${drawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
-      >
-        {/* Drawer header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-100 flex-shrink-0">
-          <div>
-            <h2 className="text-base font-bold text-gray-800">
-              {editId ? 'Edit Production Entry' : 'New Production Entry'}
-            </h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {editId ? 'Update the production record below.' : 'Fill in the production, packaging and final details.'}
-            </p>
-          </div>
-          <button
-            onClick={closeDrawer}
-            className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Drawer scrollable body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-
-          {E._root && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-600 flex items-start gap-2">
-              <AlertCircle size={14} className="mt-0.5 flex-shrink-0" /> {E._root}
-            </div>
-          )}
-
-          {/* ── CARD 1: PRODUCTION ──────────────────────────────────── */}
-          <SectionCard number="1" title="Production">
-            {/* Shared fields */}
-            <div className="grid grid-cols-2 gap-4 mb-5">
-              <Field label="Date">
-                <input type="date" className={inp} value={form.entry_date} onChange={e => setF({ entry_date: e.target.value })} />
-              </Field>
-              <Field label="Employees in Production">
-                <input type="number" min="0" className={inp} placeholder="0" value={form.production_employees} onChange={e => setF({ production_employees: e.target.value })} />
-              </Field>
-            </div>
-
-            {/* Product rows — collapsible accordions */}
-            {form.productRows.map((row, idx) => {
-              const openRow = openProd[idx];
-              return (
-                <div key={idx} className={idx > 0 ? 'mt-3 border-t border-gray-100' : ''}>
-                  <button
-                    type="button"
-                    onClick={() => toggleProd(idx)}
-                    className="w-full flex items-center justify-between py-3 group"
-                  >
-                    <span className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-2">
-                      <ChevronDown size={14} className={`transition-transform ${openRow ? '' : '-rotate-90'}`} />
-                      Product {idx + 1}
-                    </span>
-                    <span className={`text-[10px] font-medium ${row.product_id ? 'text-gray-500' : 'text-gray-300'}`}>
-                      {row.product_id ? products.find(p => p.id === row.product_id)?.name ?? 'Selected' : 'Empty'}
-                    </span>
-                  </button>
-                  {openRow && (
-                    <div className="pb-2">
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <Field label="Product">
-                          <SearchableSelect
-                            options={productOptions}
-                            value={row.product_id}
-                            onChange={v => setRow(idx, { product_id: v })}
-                            placeholder="— Select Product —"
-                            className={inp}
-                          />
-                        </Field>
-                        <Field label="Batch Number">
-                          <SearchableSelect
-                            options={batchSelOptions}
-                            value={row.batch_number}
-                            onChange={v => setRow(idx, { batch_number: v })}
-                            placeholder="Type or select batch"
-                            emptyText="No batches yet — type to enter new"
-                            className={inp}
-                          />
-                        </Field>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <Field label="No. Sheets Produced">
-                          <input type="number" min="0" className={inp} placeholder="0" value={row.produced_sheets} onChange={e => setRow(idx, { produced_sheets: e.target.value })} />
-                        </Field>
-                        <Field label="No. Target Sheets">
-                          <input type="number" min="0" className={inp} placeholder="0" value={row.target_sheets} onChange={e => setRow(idx, { target_sheets: e.target.value })} />
-                        </Field>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <Field label="Production Incharge">
-                          <SearchableSelect
-                            options={employeeOptions}
-                            value={row.production_incharge_id}
-                            onChange={v => setRow(idx, { production_incharge_id: v })}
-                            placeholder="— Select —"
-                            className={inp}
-                          />
-                        </Field>
-                      </div>
-                      <Field label="Remarks">
-                        <textarea
-                          className={`${inp} resize-none`}
-                          rows={2}
-                          placeholder="Optional production remarks..."
-                          value={row.production_remarks}
-                          onChange={e => setRow(idx, { production_remarks: e.target.value })}
-                        />
-                      </Field>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </SectionCard>
-
-          {/* ── CARD 2: PACKAGING ───────────────────────────────────── */}
-          <SectionCard number="2" title="Packaging">
-            {/* Shared staffing fields at top */}
-            <div className="grid grid-cols-2 gap-4 mb-5">
-              <Field label="Packaging Incharge" error={E.pkg_incharge_id}>
-                <SearchableSelect
-                  options={employeeOptions}
-                  value={form.pkg_incharge_id}
-                  onChange={v => setF({ pkg_incharge_id: v })}
-                  placeholder="— Select —"
-                  className={inp}
-                />
-              </Field>
-              <Field label="Employees in Packaging" error={E.pkg_employees}>
-                <input type="number" min="0" className={inp} placeholder="0" value={form.pkg_employees} onChange={e => setF({ pkg_employees: e.target.value })} />
-              </Field>
-            </div>
-
-            {/* Packaging product sections */}
-            {form.pkgRows.map((row, idx) => (
-              <div key={idx} className={idx > 0 ? 'mt-5 pt-5 border-t border-gray-100' : ''}>
-                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-3">Product {idx + 1}</p>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <Field label="Product">
-                    <SearchableSelect
-                      options={productOptions}
-                      value={row.product_id}
-                      onChange={v => setPkgRow(idx, { product_id: v })}
-                      placeholder="— Select Product —"
-                      className={inp}
-                    />
-                  </Field>
-                  <Field label="No. of Tests" error={E[`pkg_${idx}_pouches`]}>
-                    <input type="number" min="0" className={inp} placeholder="0" value={row.pouches} onChange={e => setPkgRow(idx, { pouches: e.target.value })} />
-                  </Field>
-                </div>
-                <Field label="Remarks">
-                  <textarea
-                    className={`${inp} resize-none`}
-                    rows={2}
-                    placeholder="Optional packaging remarks..."
-                    value={row.remarks}
-                    onChange={e => setPkgRow(idx, { remarks: e.target.value })}
-                  />
-                </Field>
-              </div>
-            ))}
-          </SectionCard>
-
-          {/* ── CARD 3: FINAL DETAILS ───────────────────────────────── */}
-          <SectionCard number="3" title="Final Details">
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="No. of Test / Pouch Produced" error={E.test_pouch_produced}>
-                <input type="number" min="0" className={inp} placeholder="0" value={form.test_pouch_produced} onChange={e => setF({ test_pouch_produced: e.target.value })} />
-              </Field>
-            </div>
-            <Field label="Remarks of Day">
-              <textarea
-                className={`${inp} resize-none`}
-                rows={3}
-                placeholder="Summary notes for the day..."
-                value={form.day_remarks}
-                onChange={e => setF({ day_remarks: e.target.value })}
-              />
-            </Field>
-          </SectionCard>
-
-        </div>
-
-        {/* ── Sticky action bar ─────────────────────────────────────────── */}
-        <div className="flex-shrink-0 bg-white border-t border-gray-100 px-6 py-4 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={closeDrawer}
-            className="px-5 py-2.5 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleSave(true)}
-              className="px-5 py-2.5 text-sm font-semibold text-blue-700 border-2 border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50"
-            >
-              Save & New
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => handleSave(false)}
-              className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg shadow-sm shadow-blue-200 transition-all disabled:opacity-50"
-            >
-              <CheckCircle2 size={15} />
-              {saving ? 'Saving...' : editId ? 'Update Record' : 'Save Record'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return out;
 }

@@ -1,84 +1,197 @@
-import { createClient } from '@supabase/supabase-js';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+/* Dark mode base styles */
+.dark {
+  color-scheme: dark;
+}
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+.dark body {
+  background-color: #111827;
+  color: #f3f4f6;
+}
 
-export type Product = {
-  id: string;
-  name: string;
-  code: string | null;
-  category: string | null;
-  unit: string | null;
-  description: string | null;
-  active: boolean;
-  created_at: string;
-};
+/* Dark mode component styles */
+.dark .bg-white {
+  background-color: #1f2937 !important;
+}
 
-export type ProductionEntry = {
-  id: string;
-  entry_date: string | null;
-  product_id: string | null;
-  quantity_produced: number | null;
-  lot_number: string | null;
-  batch_number: string | null;
-  operator: string | null;
-  remarks: string | null;
-  created_at: string;
-  products?: Product;
-};
+.dark .bg-gray-50 {
+  background-color: #111827 !important;
+}
 
-export type Employee = {
-  id: string;
-  name: string;
-  role: string | null;
-  active: boolean;
-  created_at: string;
-};
+.dark .bg-gray-100 {
+  background-color: #1f2937 !important;
+}
 
-export type ProductionData = {
-  id: string;
-  entry_date: string;
-  product_id: string | null;
-  batch_number: string;
-  produced_units: number;
-  produced_sheets: number;
-  target_sheets: number;
-  production_employees: number;
-  production_incharge_id: string | null;
-  production_remarks: string | null;
-  pkg_product_id: string | null;
-  pkg_employees: number | null;
-  pkg_incharge_id: string | null;
-  pkg_pouches: number | null;
-  pkg_remarks: string | null;
-  pkg_product_id_2: string | null;
-  pkg_pouches_2: number | null;
-  pkg_remarks_2: string | null;
-  pkg_product_id_3: string | null;
-  pkg_pouches_3: number | null;
-  pkg_remarks_3: string | null;
-  test_pouch_produced: number;
-  day_remarks: string | null;
-  created_at: string;
-  // joined
-  products?: Product;
-  pkg_product?: Product;
-  production_incharge?: Employee;
-  pkg_incharge?: Employee;
-};
+.dark .bg-gray-200 {
+  background-color: #374151 !important;
+}
 
-export type SheetEntry = {
-  id: string;
-  entry_date: string;
-  sheet_code: string;
-  num_sheets: number | null;
-  production_time: string;
-  dhd_employees: number | null;
-  packing_employees: number | null;
-  total_employees: number | null;
-  sheets_per_employee: number | null;
-  remarks: string | null;
-  created_at: string;
-};
+.dark .bg-blue-50 {
+  background-color: #1e3a5f !important;
+}
+
+.dark .bg-green-50 {
+  background-color: #14532d !important;
+}
+
+.dark .bg-red-50 {
+  background-color: #7f1d1d !important;
+}
+
+.dark .bg-amber-50 {
+  background-color: #78350f !important;
+}
+
+.dark .bg-red-100 {
+  background-color: #991b1b !important;
+}
+
+.dark .bg-green-100 {
+  background-color: #166534 !important;
+}
+
+.dark .bg-amber-100 {
+  background-color: #92400e !important;
+}
+
+.dark .bg-blue-100 {
+  background-color: #1e40af !important;
+}
+
+.dark .bg-emerald-100 {
+  background-color: #065f46 !important;
+}
+
+.dark .border-gray-100 {
+  border-color: #374151 !important;
+}
+
+.dark .border-gray-200 {
+  border-color: #374151 !important;
+}
+
+.dark .border-gray-300 {
+  border-color: #4b5563 !important;
+}
+
+.dark .border-blue-200 {
+  border-color: #1e40af !important;
+}
+
+.dark .border-red-200 {
+  border-color: #991b1b !important;
+}
+
+.dark .border-green-200 {
+  border-color: #166534 !important;
+}
+
+.dark .border-amber-200 {
+  border-color: #92400e !important;
+}
+
+.dark .text-gray-500,
+.dark .text-gray-600 {
+  color: #9ca3af !important;
+}
+
+.dark .text-gray-700,
+.dark .text-gray-800 {
+  color: #e5e7eb !important;
+}
+
+.dark .text-gray-400 {
+  color: #6b7280 !important;
+}
+
+.dark .text-blue-700,
+.dark .text-blue-600 {
+  color: #60a5fa !important;
+}
+
+.dark .text-red-600,
+.dark .text-red-700 {
+  color: #f87171 !important;
+}
+
+.dark .text-green-600,
+.dark .text-green-700 {
+  color: #4ade80 !important;
+}
+
+.dark .text-amber-600,
+.dark .text-amber-700 {
+  color: #fbbf24 !important;
+}
+
+.dark .text-emerald-700 {
+  color: #34d399 !important;
+}
+
+.dark .shadow-sm {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3) !important;
+}
+
+.dark .shadow {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4) !important;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+  color: #f3f4f6 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #6b7280 !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3) !important;
+}
+
+.dark table thead {
+  background-color: #1f2937 !important;
+}
+
+.dark table th {
+  color: #e5e7eb !important;
+  border-color: #374151 !important;
+}
+
+.dark table td {
+  border-color: #374151 !important;
+}
+
+.dark table tbody tr:hover {
+  background-color: #374151 !important;
+}
+
+.dark .divide-gray-100 > * + * {
+  border-color: #374151 !important;
+}
+
+.dark .divide-gray-200 > * + * {
+  border-color: #374151 !important;
+}
+
+.dark ::-webkit-scrollbar {
+  background-color: #1f2937;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #4b5563;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background-color: #1f2937;
+}

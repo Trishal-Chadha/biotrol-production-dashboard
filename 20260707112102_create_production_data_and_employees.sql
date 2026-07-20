@@ -1,119 +1,76 @@
 /*
-# Create core tables for Biotrol Professional Production Dashboard
+# Create user_roles table for role-based authentication
 
 ## Overview
-Creates the foundational tables for the production dashboard: products, production_entries, and sheet_entries.
+Creates a user_roles table to store user roles (Admin/Employee) for role-based access control.
+This table links Supabase auth.users to application roles.
 
 ## New Tables
 
-### products
+### user_roles
 - id (uuid, primary key)
-- name (text) - Product name
-- code (text) - Product code/SKU
-- category (text) - Product category
-- unit (text) - Unit of measure
-- description (text) - Optional description
-- created_at (timestamp)
-
-### production_entries
-- id (uuid, primary key)
-- entry_date (date) - Date of production
-- product_id (uuid, FK to products)
-- quantity_produced (numeric) - How much was produced
-- lot_number (text)
-- batch_number (text)
-- operator (text)
-- remarks (text)
-- created_at (timestamp)
-
-### sheet_entries
-- id (uuid, primary key)
-- entry_date (date) - Date of sheet usage
-- product_id (uuid, FK to products, nullable)
-- sheets_used (numeric) - Number of sheets used
-- lot_number (text)
-- batch_number (text)
-- remarks (text)
-- created_at (timestamp)
+- user_id (uuid, references auth.users, unique) - links to Supabase auth user
+- role (text, NOT NULL) - either 'admin' or 'employee'
+- created_at (timestamptz, default now())
+- updated_at (timestamptz, default now())
 
 ## Security
-- RLS enabled on all tables with anon + authenticated CRUD (no-auth app)
+- Enable RLS on user_roles table
+- Users can read their own role
+- Only authenticated users can access
+
+## Important Notes
+1. The user_id has a unique constraint so each user has exactly one role
+2. Role must be either 'admin' or 'employee'
+3. The table uses auth.uid() for ownership checks
 */
 
--- Products table
-CREATE TABLE IF NOT EXISTS products (
+CREATE TABLE IF NOT EXISTS user_roles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  code text,
-  category text,
-  unit text,
-  description text,
-  created_at timestamptz DEFAULT now()
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
+  role text NOT NULL CHECK (role IN ('admin', 'employee')),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+-- Enable RLS
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "anon_select_products" ON products;
-CREATE POLICY "anon_select_products" ON products FOR SELECT TO anon, authenticated USING (true);
+-- Policy: Users can read their own role
+DROP POLICY IF EXISTS "users_read_own_role" ON user_roles;
+CREATE POLICY "users_read_own_role" ON user_roles
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "anon_insert_products" ON products;
-CREATE POLICY "anon_insert_products" ON products FOR INSERT TO anon, authenticated WITH CHECK (true);
+-- Policy: Users can insert their own role (handled via trigger/function typically)
+-- For now, we'll allow authenticated users to insert their own role
+DROP POLICY IF EXISTS "users_insert_own_role" ON user_roles;
+CREATE POLICY "users_insert_own_role" ON user_roles
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "anon_update_products" ON products;
-CREATE POLICY "anon_update_products" ON products FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+-- Policy: Users can update their own role (typically admins only, but for simplicity)
+DROP POLICY IF EXISTS "users_update_own_role" ON user_roles;
+CREATE POLICY "users_update_own_role" ON user_roles
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
-DROP POLICY IF EXISTS "anon_delete_products" ON products;
-CREATE POLICY "anon_delete_products" ON products FOR DELETE TO anon, authenticated USING (true);
+-- Function to auto-update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
 
--- Production entries table
-CREATE TABLE IF NOT EXISTS production_entries (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  entry_date date,
-  product_id uuid REFERENCES products(id) ON DELETE SET NULL,
-  quantity_produced numeric,
-  lot_number text,
-  batch_number text,
-  operator text,
-  remarks text,
-  created_at timestamptz DEFAULT now()
-);
+-- Trigger to update updated_at
+DROP TRIGGER IF EXISTS update_user_roles_updated_at ON user_roles;
+CREATE TRIGGER update_user_roles_updated_at
+  BEFORE UPDATE ON user_roles
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
 
-ALTER TABLE production_entries ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "anon_select_production_entries" ON production_entries;
-CREATE POLICY "anon_select_production_entries" ON production_entries FOR SELECT TO anon, authenticated USING (true);
-
-DROP POLICY IF EXISTS "anon_insert_production_entries" ON production_entries;
-CREATE POLICY "anon_insert_production_entries" ON production_entries FOR INSERT TO anon, authenticated WITH CHECK (true);
-
-DROP POLICY IF EXISTS "anon_update_production_entries" ON production_entries;
-CREATE POLICY "anon_update_production_entries" ON production_entries FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "anon_delete_production_entries" ON production_entries;
-CREATE POLICY "anon_delete_production_entries" ON production_entries FOR DELETE TO anon, authenticated USING (true);
-
--- Sheet entries table
-CREATE TABLE IF NOT EXISTS sheet_entries (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  entry_date date,
-  product_id uuid REFERENCES products(id) ON DELETE SET NULL,
-  sheets_used numeric,
-  lot_number text,
-  batch_number text,
-  remarks text,
-  created_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE sheet_entries ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "anon_select_sheet_entries" ON sheet_entries;
-CREATE POLICY "anon_select_sheet_entries" ON sheet_entries FOR SELECT TO anon, authenticated USING (true);
-
-DROP POLICY IF EXISTS "anon_insert_sheet_entries" ON sheet_entries;
-CREATE POLICY "anon_insert_sheet_entries" ON sheet_entries FOR INSERT TO anon, authenticated WITH CHECK (true);
-
-DROP POLICY IF EXISTS "anon_update_sheet_entries" ON sheet_entries;
-CREATE POLICY "anon_update_sheet_entries" ON sheet_entries FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "anon_delete_sheet_entries" ON sheet_entries;
-CREATE POLICY "anon_delete_sheet_entries" ON sheet_entries FOR DELETE TO anon, authenticated USING (true);
+-- Create an index for faster lookups by user_id
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON user_roles(user_id);

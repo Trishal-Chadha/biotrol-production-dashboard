@@ -1,76 +1,53 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+/*
+# Rebuild sheet_entries table with new production tracking fields
 
-type Theme = 'light' | 'dark' | 'system';
+## Summary
+Drops the old sheet_entries table (which had product-centric fields) and creates a new one
+with production shift tracking fields as required by the Sheet Entry feature update.
 
-interface ThemeContextType {
-  theme: Theme;
-  effectiveTheme: 'light' | 'dark';
-  setTheme: (theme: Theme) => void;
-}
+## New Table: sheet_entries
+- id (uuid, primary key)
+- entry_date (date, NOT NULL) - production date
+- sheet_code (text, NOT NULL) - required identifier
+- num_sheets (integer) - number of sheets processed
+- production_time (text, NOT NULL) - required time field (stored as text e.g. "08:00–16:00")
+- dhd_employees (integer) - DHD department employee count
+- packing_employees (integer) - Packing department employee count
+- total_employees (integer, computed) - dhd + packing, saved at write time
+- sheets_per_employee (numeric, computed) - num_sheets / total_employees, saved at write time
+- remarks (text)
+- created_at (timestamp)
 
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+## Security
+- RLS enabled, anon + authenticated full CRUD (no-auth app)
+*/
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem('theme');
-    return (stored as Theme) || 'light';
-  });
+DROP TABLE IF EXISTS sheet_entries;
 
-  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('light');
+CREATE TABLE sheet_entries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entry_date date NOT NULL,
+  sheet_code text NOT NULL,
+  num_sheets integer,
+  production_time text NOT NULL,
+  dhd_employees integer,
+  packing_employees integer,
+  total_employees integer,
+  sheets_per_employee numeric,
+  remarks text,
+  created_at timestamptz DEFAULT now()
+);
 
-  const updateEffectiveTheme = useCallback((currentTheme: Theme) => {
-    let effective: 'light' | 'dark';
-    if (currentTheme === 'system') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      effective = prefersDark ? 'dark' : 'light';
-    } else {
-      effective = currentTheme;
-    }
-    setEffectiveTheme(effective);
-  }, []);
+ALTER TABLE sheet_entries ENABLE ROW LEVEL SECURITY;
 
-  useEffect(() => {
-    updateEffectiveTheme(theme);
+DROP POLICY IF EXISTS "anon_select_sheet_entries" ON sheet_entries;
+CREATE POLICY "anon_select_sheet_entries" ON sheet_entries FOR SELECT TO anon, authenticated USING (true);
 
-    // Listen for system theme changes
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      if (theme === 'system') {
-        updateEffectiveTheme('system');
-      }
-    };
+DROP POLICY IF EXISTS "anon_insert_sheet_entries" ON sheet_entries;
+CREATE POLICY "anon_insert_sheet_entries" ON sheet_entries FOR INSERT TO anon, authenticated WITH CHECK (true);
 
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme, updateEffectiveTheme]);
+DROP POLICY IF EXISTS "anon_update_sheet_entries" ON sheet_entries;
+CREATE POLICY "anon_update_sheet_entries" ON sheet_entries FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
 
-  useEffect(() => {
-    // Apply theme to document
-    const root = document.documentElement;
-    if (effectiveTheme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }, [effectiveTheme]);
-
-  const setTheme = useCallback((newTheme: Theme) => {
-    setThemeState(newTheme);
-    localStorage.setItem('theme', newTheme);
-    updateEffectiveTheme(newTheme);
-  }, [updateEffectiveTheme]);
-
-  return (
-    <ThemeContext.Provider value={{ theme, effectiveTheme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
-}
-
-export function useTheme() {
-  const context = useContext(ThemeContext);
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
-}
+DROP POLICY IF EXISTS "anon_delete_sheet_entries" ON sheet_entries;
+CREATE POLICY "anon_delete_sheet_entries" ON sheet_entries FOR DELETE TO anon, authenticated USING (true);
