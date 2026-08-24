@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Package, ClipboardList, Users, TrendingUp, ArrowRight, ArrowUpRight, ArrowDownRight,
-  Calendar, Layers, Target, CheckCircle2, Briefcase, UserCheck, Activity,
+  Calendar, Layers, Target, CheckCircle2, Briefcase, UserCheck, Activity, Info,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart as ReBar, Bar, LineChart as ReLine, Line,
@@ -85,14 +85,44 @@ interface KpiProps {
   loading: boolean;
   trend?: 'up' | 'down' | 'neutral';
   trendValue?: string;
+  info?: string;
 }
 
-function KpiCard({ label, value, sub, icon, accent, loading, trend, trendValue }: KpiProps) {
+function InfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        aria-label="More information"
+        onClick={e => { e.stopPropagation(); setOpen(o => !o); }}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className="text-gray-300 hover:text-blue-500 transition-colors align-middle"
+      >
+        <Info size={13} />
+      </button>
+      {open && (
+        <span
+          className="absolute z-50 top-5 left-1/2 -translate-x-1/2 w-max max-w-[300px] bg-white rounded-lg shadow-lg border border-gray-200 px-3 py-2 text-[11px] leading-relaxed text-gray-600 whitespace-normal"
+          onClick={e => e.stopPropagation()}
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function KpiCard({ label, value, sub, icon, accent, loading, trend, trendValue, info }: KpiProps) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-start gap-4">
       <div className={`rounded-xl p-3 flex-shrink-0 ${accent}`}>{icon}</div>
       <div className="min-w-0">
-        <p className="text-xs font-medium text-gray-500">{label}</p>
+        <p className="text-xs font-medium text-gray-500 flex items-center gap-1">
+          {label}
+          {info && <InfoTooltip text={info} />}
+        </p>
         <p className="text-2xl font-bold text-gray-800 mt-0.5 tabular-nums">
           {loading ? <span className="text-gray-200">—</span> : value}
         </p>
@@ -134,10 +164,13 @@ function QuickNav({ icon, title, desc, accent, onClick }: QuickNavProps) {
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, children, info }: { title: string; children: React.ReactNode; info?: string }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">{title}</h3>
+      <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-1">
+        {title}
+        {info && <InfoTooltip text={info} />}
+      </h3>
       {children}
     </div>
   );
@@ -328,31 +361,39 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
         <KpiCard label="Today's Entries" value={stats.todayRecords} loading={loading}
           icon={<Calendar size={20} className="text-blue-600" />} accent="bg-blue-50"
-          sub="production records today" />
+          sub="production records today"
+          info="Shows the number of production records created today. Data source: production_data table filtered by today's entry_date. Use this to monitor daily data-entry activity and ensure all shifts are reported." />
         <KpiCard label="Today's Units" value={stats.todayUnits.toLocaleString()} loading={loading}
           icon={<Layers size={20} className="text-emerald-600" />} accent="bg-emerald-50"
-          sub="units produced today" />
+          sub="units produced today"
+          info="Sum of produced_units across all records entered today. Data source: production_data.produced_units for today's entries. Use this to gauge total manufacturing output for the day." />
         <KpiCard label="This Month" value={stats.monthRecords} loading={loading}
           icon={<ClipboardList size={20} className="text-sky-600" />} accent="bg-sky-50"
-          sub="entries this month" />
+          sub="entries this month"
+          info="Count of production records whose entry_date falls in the current calendar month. Data source: production_data table. Use this to track monthly data-entry volume and reporting consistency." />
         <KpiCard label="Monthly Units" value={stats.monthUnits.toLocaleString()} loading={loading}
           icon={<TrendingUp size={20} className="text-violet-600" />} accent="bg-violet-50"
-          sub="units this month" />
+          sub="units this month"
+          info="Sum of produced_units for all records in the current calendar month. Data source: production_data.produced_units. Use this to monitor monthly manufacturing throughput against targets." />
       </div>
 
       {/* KPI Row 2 — employee + sheet comparison */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <KpiCard label="Total Employees" value={stats.employees} loading={loading}
           icon={<Users size={20} className="text-rose-600" />} accent="bg-rose-50"
-          sub="from employee database" />
+          sub="from employee database"
+          info="Total number of employees registered in the employee master. Data source: employees table. Use this to verify workforce capacity and plan staffing allocations." />
         <KpiCard label="Employees Worked Today" value={stats.employeesWorkedToday} loading={loading}
           icon={<UserCheck size={20} className="text-green-600" />} accent="bg-green-50"
-          sub="incharges in today's records" />
+          sub="incharges in today's records"
+          info="Count of distinct production incharges appearing in today's production records. Data source: production_data.production_incharge_id for today. Use this to confirm shift coverage and identify staffing gaps." />
         <KpiCard label="Today's Sheets" value={stats.todaySheets.toLocaleString()} loading={loading}
           icon={<Layers size={20} className="text-blue-600" />} accent="bg-blue-50"
-          trend={diffTrend} trendValue={`${Math.abs(Number(sheetsDiff))}% vs yesterday`} />
+          trend={diffTrend} trendValue={`${Math.abs(Number(sheetsDiff))}% vs yesterday`}
+          info="Sum of produced_sheets across all records entered today. Data source: production_data.produced_sheets for today. Compare with yesterday's value to detect sudden output drops or surges." />
         <KpiCard label="Yesterday's Sheets" value={stats.yesterdaySheets.toLocaleString()} loading={loading}
-          icon={<Calendar size={20} className="text-gray-600" />} accent="bg-gray-100" />
+          icon={<Calendar size={20} className="text-gray-600" />} accent="bg-gray-100"
+          info="Sum of produced_sheets across all records entered yesterday. Data source: production_data.produced_sheets for yesterday's entry_date. Use this as a baseline to compare against today's output." />
       </div>
 
       {/* Comparison cards */}
@@ -360,19 +401,24 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
         <KpiCard label="Difference %" value={`${sheetsDiff}%`} loading={loading}
           icon={diffTrend === 'up' ? <ArrowUpRight size={20} className="text-green-600" /> : <ArrowDownRight size={20} className="text-red-600" />}
           accent={diffTrend === 'up' ? 'bg-green-50' : 'bg-red-50'}
-          sub="today vs yesterday" />
+          sub="today vs yesterday"
+          info="Percentage change in total sheets produced today versus yesterday. Calculation: ((todaySheets - yesterdaySheets) / yesterdaySheets) × 100. Positive values indicate growth; negative values signal a decline that may need investigation." />
         <KpiCard label="Avg Sheets / Day" value={stats.avgSheets.toLocaleString()} loading={loading}
           icon={<Target size={20} className="text-teal-600" />} accent="bg-teal-50"
-          sub="across all records" />
+          sub="across all records"
+          info="Average sheets produced per day across all production records. Calculation: totalSheets ÷ number of distinct entry dates. Use this to set realistic daily benchmarks and identify underperforming days." />
         <KpiCard label="Total Sheets" value={stats.totalSheets.toLocaleString()} loading={loading}
-          icon={<Package size={20} className="text-orange-600" />} accent="bg-orange-50" />
+          icon={<Package size={20} className="text-orange-600" />} accent="bg-orange-50"
+          info="Cumulative sum of produced_sheets across every production record. Data source: production_data.produced_sheets. Use this to understand overall manufacturing volume since records began." />
         <KpiCard label="Total Batches" value={stats.totalBatches} loading={loading}
-          icon={<Briefcase size={20} className="text-amber-600" />} accent="bg-amber-50" />
+          icon={<Briefcase size={20} className="text-amber-600" />} accent="bg-amber-50"
+          info="Count of distinct batch numbers recorded across all production entries. Data source: production_data.batch_number. Use this to track batch diversity and production variety." />
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <ChartCard title="Daily Production Trend">
+        <ChartCard title="Daily Production Trend"
+          info="This graph shows daily production output over time. X-Axis: Production Date. Y-Axis: Number of Sheets Produced. Data source: production_data grouped by entry_date. Use this to monitor production trends, identify high and low production days, and track overall manufacturing performance." >
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData.daily} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -392,7 +438,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Weekly Production Trend">
+        <ChartCard title="Weekly Production Trend"
+          info="This graph shows weekly production output over time. X-Axis: Week. Y-Axis: Number of Sheets Produced. Data source: production_data aggregated into weekly buckets. Use this to smooth out daily fluctuations and spot medium-term trends." >
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <ReLine data={chartData.weekly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -406,7 +453,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Monthly Production Trend">
+        <ChartCard title="Monthly Production Trend"
+          info="This graph summarizes total production for each month and helps identify seasonal trends and long-term production performance. X-Axis: Month. Y-Axis: Number of Sheets. Data source: production_data grouped by month." >
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <ReBar data={chartData.monthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -426,7 +474,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Product-wise Production">
+        <ChartCard title="Product-wise Production"
+          info="This chart displays production volume for each product. Higher slices indicate products with greater production output during the selected period. Data source: production_data joined with products, grouped by product name. Use this to identify top-performing products and allocate resources accordingly." >
           <div className="h-56">
             {chartData.productWise.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -458,7 +507,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Employee Efficiency">
+        <ChartCard title="Employee Efficiency"
+          info="This chart shows total sheets produced by each production incharge. Longer bars indicate higher output by that employee. Data source: production_data joined with employees via production_incharge_id. Use this to recognize high performers and identify training needs." >
           <div className="h-56">
             {chartData.employeeEff.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -482,7 +532,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Target vs Actual Production">
+        <ChartCard title="Target vs Actual Production"
+          info="This graph compares actual production with the planned production target. Blue bars: Actual sheets produced. Gray bars: Target sheets. If Actual > Target, the target was exceeded. If Actual < Target, production is below target and may require attention. Data source: production_data.produced_sheets and target_sheets." >
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <ReBar data={chartData.targetVsActual} margin={{ top: 5, right: 10, left: 0, bottom: 0 }} barGap={2}>
@@ -498,7 +549,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Production vs Packaging Comparison">
+        <ChartCard title="Production vs Packaging Comparison"
+          info="This chart compares production output (sheets) against packaging output (tests) per day. Blue bars: Production Sheets. Amber bars: Packaging Tests. Data source: production_data.produced_sheets and pkg_pouches columns. Use this to identify bottlenecks between production and packaging stages." >
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <ReBar data={chartData.prodVsPkg} margin={{ top: 5, right: 10, left: 0, bottom: 0 }} barGap={2}>
@@ -514,7 +566,8 @@ export default function DashboardPage({ onNavigate }: DashboardPageProps) {
           </div>
         </ChartCard>
 
-        <ChartCard title="Sheet Efficiency Overview">
+        <ChartCard title="Sheet Efficiency Overview"
+          info="This donut chart shows production efficiency as produced sheets versus remaining target. Blue: Produced. Gray: Remaining to target. Calculation: (totalSheets ÷ targetSheets) × 100 = efficiency %. Use this to gauge progress toward overall production targets." >
           <div className="h-56 flex flex-col items-center justify-center">
             <div className="relative">
               <ResponsiveContainer width={200} height={200}>

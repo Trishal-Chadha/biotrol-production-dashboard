@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Check } from 'lucide-react';
 import { supabase, Product, ProductionEntry } from '../lib/supabase';
 import PageHeader from '../components/PageHeader';
@@ -12,6 +12,26 @@ const emptyForm = {
   operator: '',
   remarks: '',
 };
+
+const DRAFT_KEY = 'production_entry_draft';
+
+function isFormDirty(f: typeof emptyForm) {
+  return Object.keys(f).some(k => f[k as keyof typeof f] !== '');
+}
+
+function serializeForm(f: typeof emptyForm) {
+  return JSON.stringify(f);
+}
+
+function deserializeForm(s: string): typeof emptyForm | null {
+  try {
+    const parsed = JSON.parse(s);
+    if (parsed && typeof parsed === 'object') {
+      return { ...emptyForm, ...parsed };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
 
 function formatDate(d: string | null) {
   if (!d) return '—';

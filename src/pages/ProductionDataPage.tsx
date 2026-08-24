@@ -94,6 +94,26 @@ const emptyForm = (): FormState => ({
   pkg_employees: '',
 });
 
+const DRAFT_KEY = 'production_data_draft';
+
+function serializeForm(f: FormState): string {
+  return JSON.stringify(f);
+}
+
+function deserializeDraft(raw: string): { form: FormState; editId: string | null } | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.form) {
+      const base = emptyForm();
+      return {
+        form: { ...base, ...parsed.form },
+        editId: typeof parsed.editId === 'string' ? parsed.editId : null,
+      };
+    }
+  } catch { /* ignore malformed draft */ }
+  return null;
+}
+
 // ─── date filter ─────────────────────────────────────────────────────────────
 
 type DateFilter = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -158,6 +178,13 @@ export default function ProductionDataPage() {
   const [errors, setErrors] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // draft auto-save / restore
+  const baselineRef = useRef(serializeForm(emptyForm()));
+  const formRef = useRef(form);
+  formRef.current = form;
+  const showFormRef = useRef(showForm);
+  showFormRef.current = showForm;
+
   // table filters
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
@@ -194,6 +221,45 @@ export default function ProductionDataPage() {
   }
 
   useEffect(() => { fetchAll(); }, []);
+
+  // ── draft: restore on mount ───────────────────────────────────────────────
+  useEffect(() => {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (raw) {
+      const draft = deserializeDraft(raw);
+      if (draft) {
+        setForm(draft.form);
+        setEditId(draft.editId);
+        setShowForm(true);
+        baselineRef.current = serializeForm(draft.form);
+        return;
+      }
+    }
+  }, []);
+
+  // ── draft: auto-save when form changes ────────────────────────────────────
+  useEffect(() => {
+    if (!showForm) return;
+    const current = serializeForm(form);
+    if (current === baselineRef.current) {
+      localStorage.removeItem(DRAFT_KEY);
+    } else {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ form, editId }));
+    }
+  }, [form, editId, showForm]);
+
+  // ── draft: warn before unload if unsaved changes ───────────────────────────
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (showFormRef.current && serializeForm(formRef.current) !== baselineRef.current) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave this page?';
+        return e.returnValue;
+      }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
   // ── product options ─────────────────────────────────────────────────────────
 
@@ -252,14 +318,16 @@ export default function ProductionDataPage() {
   }
 
   function openAdd() {
-    setForm(emptyForm());
+    const f = emptyForm();
+    setForm(f);
     setEditId(null);
     setErrors([]);
     setShowForm(true);
+    baselineRef.current = serializeForm(f);
   }
 
   function openEdit(r: ProductionData) {
-    setForm({
+    const f: FormState = {
       entry_date: r.entry_date ?? today(),
       production_employees: r.production_employees?.toString() ?? '',
       day_remarks: r.day_remarks ?? '',
@@ -311,15 +379,19 @@ export default function ProductionDataPage() {
         },
       ],
       pkg_employees: r.pkg_employees?.toString() ?? '',
-    });
+    };
+    setForm(f);
     setEditId(r.id);
     setErrors([]);
     setShowForm(true);
+    baselineRef.current = serializeForm(f);
   }
 
   function clearForm() {
-    setForm(emptyForm());
+    const f = emptyForm();
+    setForm(f);
     setErrors([]);
+    baselineRef.current = serializeForm(f);
   }
 
   function validate(f: FormState): string[] {
@@ -377,18 +449,20 @@ export default function ProductionDataPage() {
           produced_units: numOrZero(row.produced_sheets),
           target_sheets: numOrZero(row.target_sheets),
           production_remarks: row.production_remarks.trim() || null,
-          prod_tests_1: numOrZero(form.productRows[0].tests_produced) || null,
-          prod_tests_2: numOrZero(form.productRows[1].tests_produced) || null,
-          prod_tests_3: numOrZero(form.productRows[2].tests_produced) || null,
-          prod_tests_4: numOrZero(form.productRows[3].tests_produced) || null,
-          prod_tests_5: numOrZero(form.productRows[4].tests_produced) || null,
-          prod_tests_6: numOrZero(form.productRows[5].tests_produced) || null,
+          prod_tests_1: form.productRows[0].tests_produced ? numOrZero(form.productRows[0].tests_produced) : null,
+          prod_tests_2: form.productRows[1].tests_produced ? numOrZero(form.productRows[1].tests_produced) : null,
+          prod_tests_3: form.productRows[2].tests_produced ? numOrZero(form.productRows[2].tests_produced) : null,
+          prod_tests_4: form.productRows[3].tests_produced ? numOrZero(form.productRows[3].tests_produced) : null,
+          prod_tests_5: form.productRows[4].tests_produced ? numOrZero(form.productRows[4].tests_produced) : null,
+          prod_tests_6: form.productRows[5].tests_produced ? numOrZero(form.productRows[5].tests_produced) : null,
         };
         const { error } = await supabase.from('production_data').update(payload).eq('id', editId);
         if (error) { setErrors([error.message]); setSaving(false); return; }
       } else {
-        const insertRows = form.productRows.filter(r => r.product_id);
-        const payloads = insertRows.map((row, i) => ({
+        const insertRows = form.productRows
+          .map((row, originalIdx) => ({ row, originalIdx }))
+          .filter(({ row }) => row.product_id);
+        const payloads = insertRows.map(({ row, originalIdx }) => ({
           ...commonFields,
           product_id: row.product_id || null,
           batch_number: row.batch_number.trim(),
@@ -396,18 +470,20 @@ export default function ProductionDataPage() {
           produced_units: numOrZero(row.produced_sheets),
           target_sheets: numOrZero(row.target_sheets),
           production_remarks: row.production_remarks.trim() || null,
-          prod_tests_1: i === 0 ? (numOrZero(form.productRows[0].tests_produced) || null) : null,
-          prod_tests_2: i === 1 ? (numOrZero(form.productRows[1].tests_produced) || null) : null,
-          prod_tests_3: i === 2 ? (numOrZero(form.productRows[2].tests_produced) || null) : null,
-          prod_tests_4: i === 3 ? (numOrZero(form.productRows[3].tests_produced) || null) : null,
-          prod_tests_5: i === 4 ? (numOrZero(form.productRows[4].tests_produced) || null) : null,
-          prod_tests_6: i === 5 ? (numOrZero(form.productRows[5].tests_produced) || null) : null,
+          prod_tests_1: originalIdx === 0 ? (row.tests_produced ? numOrZero(row.tests_produced) : null) : null,
+          prod_tests_2: originalIdx === 1 ? (row.tests_produced ? numOrZero(row.tests_produced) : null) : null,
+          prod_tests_3: originalIdx === 2 ? (row.tests_produced ? numOrZero(row.tests_produced) : null) : null,
+          prod_tests_4: originalIdx === 3 ? (row.tests_produced ? numOrZero(row.tests_produced) : null) : null,
+          prod_tests_5: originalIdx === 4 ? (row.tests_produced ? numOrZero(row.tests_produced) : null) : null,
+          prod_tests_6: originalIdx === 5 ? (row.tests_produced ? numOrZero(row.tests_produced) : null) : null,
         }));
         const { error } = await supabase.from('production_data').insert(payloads);
         if (error) { setErrors([error.message]); setSaving(false); return; }
       }
       setSaving(false);
       setShowForm(false);
+      localStorage.removeItem(DRAFT_KEY);
+      baselineRef.current = serializeForm(emptyForm());
       fetchAll();
     } catch (err) {
       setErrors([String(err)]);
