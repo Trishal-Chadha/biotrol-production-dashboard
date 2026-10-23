@@ -141,11 +141,11 @@ function SectionCard({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50/60 transition-colors"
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50/60 transition-colors rounded-xl"
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-gray-700">
           {icon}
@@ -176,6 +176,7 @@ export default function ProductionDataPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [successMsg, setSuccessMsg] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // draft auto-save / restore
@@ -228,6 +229,7 @@ export default function ProductionDataPage() {
     if (raw) {
       const draft = deserializeDraft(raw);
       if (draft) {
+        formRef.current = draft.form;
         setForm(draft.form);
         setEditId(draft.editId);
         setShowForm(true);
@@ -301,27 +303,37 @@ export default function ProductionDataPage() {
 
   // ── form helpers ───────────────────────────────────────────────────────────
 
+  function updateForm(patch: Partial<FormState>) {
+    const next = { ...formRef.current, ...patch };
+    formRef.current = next;
+    setForm(next);
+  }
+
   function setRow(idx: number, patch: Partial<ProductRow>) {
-    setForm(f => {
-      const rows = [...f.productRows];
-      rows[idx] = { ...rows[idx], ...patch };
-      return { ...f, productRows: rows };
-    });
+    const f = formRef.current;
+    const rows = [...f.productRows];
+    rows[idx] = { ...rows[idx], ...patch };
+    const next = { ...f, productRows: rows };
+    formRef.current = next;
+    setForm(next);
   }
 
   function setPkgRow(idx: number, patch: Partial<PkgRow>) {
-    setForm(f => {
-      const rows = [...f.pkgRows];
-      rows[idx] = { ...rows[idx], ...patch };
-      return { ...f, pkgRows: rows };
-    });
+    const f = formRef.current;
+    const rows = [...f.pkgRows];
+    rows[idx] = { ...rows[idx], ...patch };
+    const next = { ...f, pkgRows: rows };
+    formRef.current = next;
+    setForm(next);
   }
 
   function openAdd() {
     const f = emptyForm();
+    formRef.current = f;
     setForm(f);
     setEditId(null);
     setErrors([]);
+    setSuccessMsg('');
     setShowForm(true);
     baselineRef.current = serializeForm(f);
   }
@@ -380,15 +392,18 @@ export default function ProductionDataPage() {
       ],
       pkg_employees: r.pkg_employees?.toString() ?? '',
     };
+    formRef.current = f;
     setForm(f);
     setEditId(r.id);
     setErrors([]);
+    setSuccessMsg('');
     setShowForm(true);
     baselineRef.current = serializeForm(f);
   }
 
   function clearForm() {
     const f = emptyForm();
+    formRef.current = f;
     setForm(f);
     setErrors([]);
     baselineRef.current = serializeForm(f);
@@ -399,12 +414,12 @@ export default function ProductionDataPage() {
     if (!f.entry_date) errs.push('Date is required.');
     const row1 = f.productRows[0];
     if (!row1.product_id) errs.push('Product 1 is required.');
-    if (!row1.batch_number.trim()) errs.push('Batch Number for Product 1 is required.');
     return errs;
   }
 
   async function handleSave(ev: React.FormEvent) {
     ev.preventDefault();
+    const form = formRef.current;
     const errs = validate(form);
     if (errs.length) { setErrors(errs); return; }
 
@@ -482,9 +497,13 @@ export default function ProductionDataPage() {
       }
       setSaving(false);
       setShowForm(false);
+      const fresh = emptyForm();
+      formRef.current = fresh;
+      setForm(fresh);
       localStorage.removeItem(DRAFT_KEY);
-      baselineRef.current = serializeForm(emptyForm());
-      fetchAll();
+      baselineRef.current = serializeForm(fresh);
+      setSuccessMsg(editId ? 'Entry updated successfully.' : 'Entry saved successfully.');
+      await fetchAll();
     } catch (err) {
       setErrors([String(err)]);
       setSaving(false);
@@ -787,6 +806,17 @@ export default function ProductionDataPage() {
         </div>
       )}
 
+      {successMsg && (
+        <div className="mb-4 flex items-center justify-between gap-3 bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
+          <div className="flex items-center gap-2">
+            <Check size={16} /> {successMsg}
+          </div>
+          <button onClick={() => setSuccessMsg('')} className="text-green-600 hover:text-green-800">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* ── Form ─────────────────────────────────────────────────────────── */}
       {showForm && (
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
@@ -811,7 +841,7 @@ export default function ProductionDataPage() {
                     type="date"
                     className={inp}
                     value={form.entry_date}
-                    onChange={e => setForm(f => ({ ...f, entry_date: e.target.value }))}
+                    onChange={e => updateForm({ entry_date: e.target.value })}
                   />
                 </Field>
                 <Field label="Production Employees">
@@ -821,7 +851,7 @@ export default function ProductionDataPage() {
                     className={inp}
                     placeholder="0"
                     value={form.production_employees}
-                    onChange={e => setForm(f => ({ ...f, production_employees: e.target.value }))}
+                    onChange={e => updateForm({ production_employees: e.target.value })}
                   />
                 </Field>
                 <div className="md:col-span-2">
@@ -830,7 +860,7 @@ export default function ProductionDataPage() {
                       className={`${inp} resize-none`}
                       rows={2}
                       value={form.day_remarks}
-                      onChange={e => setForm(f => ({ ...f, day_remarks: e.target.value }))}
+                      onChange={e => updateForm({ day_remarks: e.target.value })}
                       placeholder="Optional day-level remarks"
                     />
                   </Field>
@@ -926,7 +956,7 @@ export default function ProductionDataPage() {
                       className={inp}
                       placeholder="0"
                       value={form.pkg_employees}
-                      onChange={e => setForm(f => ({ ...f, pkg_employees: e.target.value }))}
+                      onChange={e => updateForm({ pkg_employees: e.target.value })}
                     />
                   </Field>
                 </div>
